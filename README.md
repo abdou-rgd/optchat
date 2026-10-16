@@ -75,3 +75,14 @@ Voir `notes/pi-durable.md` et `notes/pi-durable-spike.md` (Pi Durable, Earendil)
 ## Banc v5 : Underdog-Saluki-27B (8 octobre 2026)
 
 Même base Qwen3.8-27B que Bonsai 2, compression IQ2-mix de 7,9 Go lisible par le llama.cpp standard. Résultat (`bench_results_v5_saluki.md`) : rappel 8/8, 48 tours en 3,9 min, tour en cache ~1,2 s, tour avec promotion ~5 s, génération ~21 tok/s (Bonsai : ~24), 10,0 Go de VRAM occupés (Bonsai : 7,3). Verdict : remplacement valable, surtout si l'on veut se passer du fork PrismML ; Bonsai reste le défaut pour la marge de VRAM. Fichier : `models/Underdog-Saluki-27B-1.0-IQ2-mix.gguf`.
+
+## Banc v6 : Bonsai 2 9B et 4B (Q2_0) sur llama.cpp upstream b11700 (17 octobre 2026)
+
+Même banc de rappel, trois exécutions par modèle, serveur upstream (`llama-server` build 11700, CUDA 12.4, aucun fork), `-c 24576 -np 2 -ngl 99 --jinja -fa on -ctk q8_0 -ctv q8_0`. Fichiers `bench_results_v6_*.md`.
+
+| modèle | fichier | VRAM serveur | génération | rappel (3 runs) | durée d'un run | 27B (v4, fork) |
+|---|---|---|---|---|---|---|
+| 9B | `Ternary-Bonsai-2-9B-Q2_0.gguf` (2,56 Go) | ≈ 2,95 Go | 77–80 tok/s | 7/8, 7/8, 8/8 | ≈ 1 min | 8/8, ≈ 4–5 min, 7,3 Go |
+| 4B | `Ternary-Bonsai-2-4B-Q2_0.gguf` (1,21 Go) | ≈ 1,9 Go | 104–108 tok/s | 8/8, 5/8, 7/8 | < 1 min | |
+
+Les échecs sont des « je ne trouve pas » sur des faits plantés (nom + date, port SSH), donc des pertes à la compaction, comme pour l'ancien 8B mais bien moins fréquentes. Le 27B reste la référence pour la mémoire ; le 9B est un compromis plausible, le 4B un compacteur candidat à tester seul sur le slot 1.
