@@ -1,0 +1,1406 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>OptChat local</title>
+<meta name="description" content="Rapport de la nuit du 7 octobre 2026 : prototype OptChat sur Bonsai 27B en local, mesures, échecs, et comparatif dsh / Pi Durable.">
+<style>
+/* Layout: long-form night report. Sticky contents rail on wide screens, one reading column (68ch),
+   figures allowed to span the whole main column. Moss accent from the bonsai, chart colours from the validated dataviz palette. */
+:root {
+  color-scheme: light;
+  --bg: #f4f5f1;
+  --surface: #fbfbf8;
+  --ink: #141b17;
+  --ink-2: #46504a;
+  --muted: #66706a;
+  --rule: #d9dfd7;
+  --axis: #b9c0b8;
+  --accent: #2b6a4e;
+  --accent-wash: #e2eee6;
+  --on-accent: #ffffff;
+  --code-bg: #eceee9;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --on-s1: #ffffff;
+  --deemph: #8f9790;
+  --lv0: #86b6ef;
+  --lv1: #5598e7;
+  --lv2: #256abf;
+  --lv3: #104281;
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --crit: #d03b3b;
+  --shadow: rgba(20, 27, 23, .16);
+  --font-display: "Bahnschrift", "DIN Alternate", "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1412;
+    --surface: #161c19;
+    --ink: #e6ebe7;
+    --ink-2: #b3bcb6;
+    --muted: #8e9891;
+    --rule: #2a332e;
+    --axis: #3d4741;
+    --accent: #7fc6a2;
+    --accent-wash: #1b2a22;
+    --on-accent: #0f1412;
+    --code-bg: #1c231f;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --on-s1: #0b1220;
+    --deemph: #5f6862;
+    --lv0: #184f95;
+    --lv1: #256abf;
+    --lv2: #3987e5;
+    --lv3: #6da7ec;
+    --shadow: rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1412;
+  --surface: #161c19;
+  --ink: #e6ebe7;
+  --ink-2: #b3bcb6;
+  --muted: #8e9891;
+  --rule: #2a332e;
+  --axis: #3d4741;
+  --accent: #7fc6a2;
+  --accent-wash: #1b2a22;
+  --on-accent: #0f1412;
+  --code-bg: #1c231f;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --on-s1: #0b1220;
+  --deemph: #5f6862;
+  --lv0: #184f95;
+  --lv1: #256abf;
+  --lv2: #3987e5;
+  --lv3: #6da7ec;
+  --shadow: rgba(0, 0, 0, .45);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 16px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.62;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+[hidden] { display: none !important; }
+
+.page { max-width: 1240px; margin: 0 auto; padding-inline: clamp(16px, 4vw, 48px); padding-block: 0 96px; }
+
+/* masthead */
+.masthead { padding-block: clamp(36px, 6vw, 72px) 34px; border-bottom: 1px solid var(--rule); }
+.eyebrow {
+  font-family: var(--font-display); font-weight: 600; font-size: .78rem;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0;
+}
+h1 {
+  font-family: var(--font-display); font-weight: 600;
+  font-size: clamp(2.1rem, 1.3rem + 3vw, 3.35rem); line-height: 1.06; letter-spacing: -.012em;
+  margin: .35em 0 .45em; max-width: 19ch; text-wrap: balance;
+}
+.dek { font-size: 1.14rem; line-height: 1.55; color: var(--ink-2); max-width: 62ch; margin: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 10px 32px; margin: 28px 0 0; padding: 0; }
+.meta div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.meta dt { font-family: var(--font-display); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.meta dd { margin: 0; font-size: .95rem; }
+
+/* layout + contents rail */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.toc { padding-top: 24px; }
+.toc-label { font-family: var(--font-display); font-weight: 600; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.toc a {
+  display: grid; grid-template-columns: 1.7em minmax(0, 1fr); gap: 6px; padding: 6px 8px; border-radius: 6px;
+  color: var(--ink-2); text-decoration: none; font-size: .9rem; line-height: 1.35;
+}
+.toc a:hover { background: var(--accent-wash); color: var(--ink); }
+.toc a[aria-current="true"] { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
+.toc .n { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); padding-top: 2px; }
+@media (min-width: 1080px) {
+  .layout { grid-template-columns: 210px minmax(0, 1fr); gap: 60px; }
+  .toc { position: sticky; top: max(16px, env(safe-area-inset-top, 0px)); align-self: start; max-height: calc(100vh - 32px); overflow-y: auto; padding-top: 46px; }
+  .toc ol { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* sections and type */
+main { min-width: 0; }
+main > section { padding-block: 44px 16px; border-top: 1px solid var(--rule); }
+main > section:first-child { border-top: 0; }
+h2 {
+  font-family: var(--font-display); font-weight: 600; font-size: clamp(1.5rem, 1.2rem + 1vw, 1.95rem);
+  line-height: 1.15; margin: 0 0 .75em; text-wrap: balance;
+  display: flex; gap: .55em; align-items: baseline;
+}
+h2 .sn {
+  font-family: var(--font-mono); font-weight: 500; font-size: .5em; color: var(--accent);
+  border: 1px solid currentColor; border-radius: 4px; padding: .08em .45em; position: relative; top: -.3em; flex: none;
+}
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 1.22rem; line-height: 1.25; margin: 2.1em 0 .55em; text-wrap: balance; }
+p, ul, ol, dl { max-width: 68ch; }
+p { margin: 0 0 1em; }
+ul, ol { padding-left: 1.3em; margin: 0 0 1em; }
+li + li { margin-top: .35em; }
+strong { font-weight: 650; }
+.lede { font-size: 1.08rem; }
+.small { font-size: .875rem; color: var(--ink-2); }
+.note { font-size: .86rem; color: var(--ink-2); border-top: 1px solid var(--rule); padding-top: 10px; margin-top: 14px; max-width: 72ch; }
+code { font-family: var(--font-mono); font-size: .86em; background: var(--code-bg); padding: .1em .36em; border-radius: 4px; overflow-wrap: anywhere; }
+pre {
+  font-family: var(--font-mono); font-size: .84rem; line-height: 1.55; background: var(--code-bg);
+  border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 14px 0 22px; max-width: 100%;
+}
+pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+pre .c { color: var(--muted); }
+
+/* key figures */
+.stats { display: flex; flex-wrap: wrap; gap: 18px 40px; margin: 26px 0 30px; padding: 18px 0; border-block: 1px solid var(--rule); max-width: none; }
+.stat { min-width: 0; }
+.stat b { display: block; font-family: var(--font-body); font-weight: 600; font-size: 1.9rem; line-height: 1.1; letter-spacing: -.01em; }
+.stat span { display: block; font-size: .82rem; color: var(--ink-2); max-width: 22ch; line-height: 1.35; margin-top: 4px; }
+
+.brief { list-style: none; padding: 0; display: grid; gap: 12px; }
+.brief li + li { margin-top: 0; }
+
+.verdict { background: var(--accent-wash); border-radius: 12px; padding: 20px 24px; max-width: 74ch; margin: 26px 0 8px; }
+.verdict p:last-child { margin-bottom: 0; }
+.verdict .eyebrow { margin-bottom: 6px; }
+
+.aside { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px 22px; max-width: 74ch; margin: 24px 0; }
+.aside h3 { margin-top: 0; }
+.aside p:last-child { margin-bottom: 0; }
+
+/* figures */
+.fig { position: relative; margin: 24px 0 32px; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px 20px 16px; }
+.fig-title { font-family: var(--font-display); font-weight: 600; font-size: .95rem; margin: 0 0 10px; color: var(--ink); }
+.fig-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.fig svg { display: block; width: 100%; height: auto; }
+.fig svg.w640 { min-width: 640px; }
+.fig svg.w520 { min-width: 520px; }
+figcaption { font-size: .875rem; line-height: 1.5; color: var(--ink-2); margin-top: 12px; max-width: 82ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 12px; padding: 0; list-style: none; font-size: .85rem; color: var(--ink-2); max-width: none; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend li + li { margin-top: 0; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.sw-s1 { background: var(--s1); }
+.sw-s2 { background: var(--s2); }
+.sw-de { background: var(--deemph); }
+.sw-band { background: var(--accent-wash); outline: 1px solid var(--rule); }
+.sw-lv { width: 34px; background: linear-gradient(90deg, var(--lv0) 0 25%, var(--lv1) 25% 50%, var(--lv2) 50% 75%, var(--lv3) 75%); }
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px 32px; align-items: start; }
+@media (min-width: 900px) { .split { grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); } .split .fig { margin-top: 4px; } }
+
+/* svg text and marks */
+svg text { font-family: var(--font-body); fill: var(--ink); }
+.t-tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.t-panel { font-size: 12.5px; font-weight: 600; fill: var(--ink-2); }
+.t-note { font-size: 11px; fill: var(--muted); }
+.t-val { font-size: 11.5px; font-weight: 600; fill: var(--ink); font-variant-numeric: tabular-nums; }
+.t-eyebrow { font-family: var(--font-display); font-size: 10.5px; font-weight: 600; letter-spacing: .12em; fill: var(--muted); }
+.t-acc { fill: var(--accent); }
+.t-title { font-size: 14px; font-weight: 600; fill: var(--ink); }
+.t-title2 { font-size: 13px; font-weight: 600; fill: var(--ink); }
+.t-body { font-size: 12.5px; fill: var(--ink-2); }
+.t-mono { font-family: var(--font-mono); font-size: 12px; fill: var(--ink-2); }
+.t-chip { font-family: var(--font-mono); font-size: 11.5px; fill: var(--ink); }
+.t-id { font-family: var(--font-mono); font-size: 11.5px; fill: var(--ink); }
+.t-step { font-size: 10.5px; font-weight: 700; fill: var(--on-accent); }
+.grid { stroke: var(--rule); stroke-width: 1; }
+.axis { stroke: var(--axis); stroke-width: 1; }
+.band { fill: var(--accent-wash); }
+.bar-hi { fill: var(--s1); }
+.bar-lo { fill: var(--deemph); }
+.hit { fill: transparent; pointer-events: all; }
+.hit:focus { outline: none; }
+.hit:focus-visible { stroke: var(--accent); stroke-width: 2; }
+.cursor { fill: var(--ink); opacity: .07; }
+.box { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+.box-hi { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.5; }
+.chip { fill: var(--code-bg); stroke: var(--rule); stroke-width: 1; }
+.api-bg { fill: var(--surface); }
+.link { stroke: var(--axis); stroke-width: 1.2; fill: none; }
+.link-hi { stroke: var(--accent); stroke-width: 2.2; fill: none; }
+.step { fill: var(--accent); }
+.x-mark { stroke: var(--crit); stroke-width: 2; stroke-linecap: round; fill: none; }
+.meter-track { fill: var(--rule); }
+.meter-fill { fill: var(--s1); }
+.seg-sys { fill: var(--deemph); }
+.seg-dig { fill: var(--lv2); }
+.seg-raw { fill: var(--s2); }
+.seg-s1 { fill: var(--s1); }
+.seg-s2 { fill: var(--s2); }
+.saw { stroke: var(--s2); stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dot { fill: var(--s1); stroke: var(--surface); stroke-width: 2; }
+.tickmark { stroke: var(--ink-2); stroke-width: 1; }
+.lv0 { fill: var(--lv0); } .lv1 { fill: var(--lv1); } .lv2 { fill: var(--lv2); } .lv3 { fill: var(--lv3); } .lv-raw { fill: var(--s2); }
+
+/* tooltip */
+.tip {
+  position: absolute; z-index: 5; max-width: 320px; background: var(--ink); color: var(--bg);
+  border-radius: 8px; padding: 10px 12px; font-size: .8rem; line-height: 1.42; pointer-events: none;
+  box-shadow: 0 8px 28px var(--shadow);
+}
+.tip strong { display: block; font-size: .95rem; font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+.tip .m { opacity: .78; margin-top: 4px; }
+
+/* zoom trace */
+.trace { list-style: none; padding: 0; margin: 16px 0 10px; display: grid; gap: 8px; max-width: none; }
+.trace li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; font-size: .9rem; line-height: 1.5; }
+.trace li + li { margin-top: 0; }
+.trace .k { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: .72rem; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+.label-sm { font-size: .82rem; color: var(--muted); margin: 14px 0 4px; }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; margin: 18px 0 26px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; line-height: 1.45; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+thead th { font-family: var(--font-display); font-weight: 600; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+tbody tr:last-child > * { border-bottom: 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cmp { min-width: 780px; }
+.cmp tbody th { font-weight: 600; width: 17%; }
+.cmp td { width: 41.5%; }
+.measures { min-width: 560px; }
+.measures td:first-child { width: 40%; }
+.src { color: var(--muted); font-size: .82rem; }
+details { margin: 10px 0 0; }
+summary { cursor: pointer; font-size: .88rem; color: var(--accent); font-weight: 600; width: fit-content; }
+details .tbl-wrap { margin: 10px 0 4px; max-height: 440px; overflow: auto; }
+details table { font-size: .82rem; }
+details th, details td { padding: 6px 10px; }
+
+/* recall grid */
+.recall { min-width: 700px; }
+.recall th, .recall td { text-align: center; vertical-align: middle; padding: 10px 6px; }
+.recall thead th { text-transform: none; letter-spacing: 0; font-family: var(--font-body); font-size: .84rem; color: var(--ink); font-weight: 600; line-height: 1.25; vertical-align: bottom; }
+.recall thead th small { display: block; font-weight: 400; color: var(--muted); font-size: .74rem; margin-top: 2px; }
+.recall tbody th { text-align: left; font-weight: 600; white-space: nowrap; padding-left: 14px; }
+.recall tbody th small { display: block; font-weight: 400; color: var(--muted); font-size: .76rem; }
+.recall .total { font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; padding-right: 14px; }
+.recall tbody td, .recall tbody th { vertical-align: top; }
+.recall tbody .total { padding-top: 13px; }
+.rmark { position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; cursor: default; }
+.rmark.ok { background: var(--s1); color: var(--on-s1); }
+.rmark.miss { border: 1.5px solid var(--crit); color: var(--crit); }
+.rmark svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.why { display: block; font-size: .7rem; color: var(--muted); margin-top: 3px; line-height: 1.1; }
+.vh { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* incidents */
+.incidents { list-style: none; padding: 0; margin: 18px 0; max-width: none; }
+.incident { display: grid; grid-template-columns: 158px minmax(0, 1fr); gap: 6px 24px; padding: 20px 0; border-top: 1px solid var(--rule); }
+.incident + .incident { margin-top: 0; }
+.incident h3 { margin: 0 0 .4em; font-size: 1.1rem; }
+.incident p:last-child, .incident ul:last-child { margin-bottom: 0; }
+@media (max-width: 640px) { .incident { grid-template-columns: minmax(0, 1fr); } }
+.st {
+  display: inline-flex; align-items: center; gap: 7px; align-self: start; width: fit-content;
+  font-size: .78rem; font-weight: 600; color: var(--ink-2); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 3px 11px 3px 6px; white-space: nowrap; margin-top: 2px;
+}
+.st svg { width: 14px; height: 14px; flex: none; }
+.st .ico-bg-ok { fill: var(--good); } .st .ico-bg-x { fill: var(--crit); } .st .ico-bg-bad { fill: var(--serious); } .st .ico-bg-q { fill: var(--warn); }
+.st .ico-fg { stroke: #ffffff; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.st .ico-fg-dark { stroke: #141b17; stroke-width: 1.7; fill: none; stroke-linecap: round; }
+.vs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; margin: 12px 0 6px; max-width: 900px; }
+.vs > div { background: var(--code-bg); border-radius: 8px; padding: 12px 14px; font-size: .88rem; line-height: 1.5; min-width: 0; }
+.vs b { display: block; font-family: var(--font-display); font-weight: 600; font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.vs p { margin: 0 0 .5em; }
+.vs .lost { color: var(--crit); font-weight: 600; }
+
+/* two-column cards */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 18px; margin: 18px 0 8px; }
+.col { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px 20px; min-width: 0; }
+.col h4 { font-family: var(--font-display); font-weight: 600; font-size: 1.08rem; margin: 0 0 2px; }
+.col .sub { font-size: .82rem; color: var(--muted); margin: 0 0 12px; }
+.col p { font-size: .94rem; }
+.col p:last-child { margin-bottom: 0; }
+.col .k-label { font-family: var(--font-display); font-weight: 600; font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+.checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+.checks li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; font-size: .9rem; line-height: 1.48; }
+.checks li + li { margin-top: 0; }
+.checks svg { width: 14px; height: 14px; margin-top: 4px; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.checks .yes svg { stroke: var(--accent); }
+.checks .no svg { stroke: var(--muted); }
+
+.pitfalls { list-style: none; padding: 0; display: grid; gap: 14px; max-width: 74ch; }
+.pitfalls li + li { margin-top: 0; }
+.pitfalls li { border-top: 1px solid var(--rule); padding-top: 12px; }
+.steps li { padding-left: .2em; }
+
+/* method box */
+.method { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 20px 24px; }
+.method h3 { margin-top: 0; }
+.timeline { list-style: none; padding: 0; margin: 14px 0 6px; max-width: 82ch; }
+.timeline li { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 14px; font-size: .92rem; padding: 7px 0; border-top: 1px solid var(--rule); }
+.timeline li + li { margin-top: 0; }
+.timeline time { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+@media (max-width: 520px) { .timeline li { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--rule); font-size: .82rem; color: var(--muted); max-width: 82ch; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .toc a { transition: background-color .15s ease, color .15s ease; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="masthead">
+  <p class="eyebrow">Rapport de nuit · 7 octobre 2026</p>
+  <h1>Une mémoire sans fin pour Bonsai, sur ta RTX&nbsp;3060</h1>
+  <p class="dek">Tu t'es endormi pendant que le travail avançait. Voici tout ce qui s'est passé entre 21h30 et minuit&nbsp;: ce qui a été construit, ce qui a été mesuré, ce qui a raté, et ma recommandation entre dsh et Pi Durable.</p>
+  <dl class="meta">
+    <div><dt>Machine</dt><dd>RTX 3060, 12&nbsp;Go</dd></div>
+    <div><dt>Modèle</dt><dd>Ternary Bonsai 2 27B</dd></div>
+    <div><dt>Moteur</dt><dd>llama.cpp, fork PrismML</dd></div>
+    <div><dt>Rédigé par</dt><dd>Claude (Opus), d'après les notes de la session</dd></div>
+  </dl>
+</header>
+
+<div class="layout">
+<nav class="toc" aria-label="Sommaire">
+  <p class="toc-label">Sommaire</p>
+  <ol>
+    <li><a href="#bref"><span class="n">1</span><span>En bref</span></a></li>
+    <li><a href="#briques"><span class="n">2</span><span>Les briques, vulgarisées</span></a></li>
+    <li><a href="#optchat"><span class="n">3</span><span>OptChat, comment ça marche</span></a></li>
+    <li><a href="#mesures"><span class="n">4</span><span>Ce qui a été mesuré</span></a></li>
+    <li><a href="#rate"><span class="n">5</span><span>Ce qui a raté, ce qui a été corrigé</span></a></li>
+    <li><a href="#comparatif"><span class="n">6</span><span>dsh ou Pi Durable</span></a></li>
+    <li><a href="#fichiers"><span class="n">7</span><span>Fichiers et relance</span></a></li>
+    <li><a href="#methode"><span class="n">8</span><span>Méthode de travail</span></a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============================================================ 1 -->
+<section id="bref">
+  <h2><span class="sn">1</span>En bref</h2>
+  <p class="lede">Tu m'as demandé un avis sur OptChat, l'idée de VictorTaelin (un chat sans fin dont l'historique sert de mémoire), pour une IA locale avec Bonsai 27B et dsh. Puis «&nbsp;occupe-toi en&nbsp;». En fin de soirée, tu as ajouté&nbsp;: tester Pi Durable, comparer dsh et Pi Durable, écrire ce rapport, éteindre le PC.</p>
+  <ul class="brief">
+    <li><strong>Construit.</strong> <code>optchat.py</code>, un prototype complet en Python (journal, arbre de résumés, vue, outil <code>zoom</code>) qui tourne sur ta carte avec Bonsai 2 27B. Il passe par le fork PrismML de llama.cpp, le seul qui sache charger Bonsai. Plus un banc de rappel, et deux essais réels&nbsp;: dsh et Pi Durable pilotent tous les deux Bonsai en local.</li>
+    <li><strong>Mesuré.</strong> Rappel 8/8 avec le 27B comme compacteur, 2/8 avec le Bonsai 8B. Environ 1&nbsp;s par tour quand le cache du serveur sert, 4,5 à 5&nbsp;s quand le digest change. 7,3&nbsp;Go de VRAM.</li>
+    <li><strong>Recommandé.</strong> dsh pour coder dès maintenant, avec un preset allégé. Pi Durable + OptChat pour l'assistant à mémoire qui tourne en permanence.</li>
+  </ul>
+
+  <div class="stats" role="list">
+    <div class="stat" role="listitem"><b>8/8</b><span>rappel avec le 27B comme compacteur (bancs v2 et v4)</span></div>
+    <div class="stat" role="listitem"><b>2/8</b><span>rappel avec le Bonsai 8B comme compacteur (banc v3)</span></div>
+    <div class="stat" role="listitem"><b>~1&nbsp;s</b><span>par tour quand le cache sert</span></div>
+    <div class="stat" role="listitem"><b>4,5–5&nbsp;s</b><span>par tour quand le digest change</span></div>
+    <div class="stat" role="listitem"><b>7,3&nbsp;Go</b><span>de VRAM&nbsp;: 27B, 2 slots de 12k, cache q8</span></div>
+  </div>
+
+  <div class="verdict">
+    <p class="eyebrow">Le verdict en deux phrases</p>
+    <p>dsh est un <strong>produit</strong>&nbsp;: un agent de codage complet qui marche avec Bonsai dès ce matin, à condition d'alléger son enveloppe de 5,8k tokens. Pi Durable est une <strong>bibliothèque</strong>&nbsp;: il faut écrire l'agent soi-même, mais il laisse décider de chaque token envoyé au modèle, et sur 12&nbsp;Go c'est la fenêtre de contexte qui est la ressource rare.</p>
+  </div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="briques">
+  <h2><span class="sn">2</span>Les briques, vulgarisées</h2>
+  <p>Une IA locale, c'est un empilement. Chaque couche a un rôle simple, et une couche qui casse bloque tout ce qui est au-dessus.</p>
+
+  <figure class="fig">
+    <p class="fig-title">L'empilement de cette nuit, de l'interface au GPU</p>
+    <div class="fig-scroll">
+      <svg class="w640" viewBox="0 0 760 440" role="img" aria-labelledby="layers-t">
+        <title id="layers-t">Couches : interface, harness avec la mémoire OptChat, API HTTP, moteur llama-server du fork PrismML, modèle Bonsai 27B, carte RTX 3060 avec 7,3 Go occupés sur 12.</title>
+        <!-- interface -->
+        <rect class="box" x="16" y="12" width="532" height="54" rx="8"/>
+        <text class="t-eyebrow" x="32" y="34">INTERFACE</text>
+        <text class="t-body" x="32" y="53">ce que tu touches</text>
+        <text class="t-title" x="180" y="34">Terminal, app desktop, un jour un bot</text>
+        <text class="t-mono" x="180" y="53">python optchat.py chat</text>
+        <!-- harness -->
+        <rect class="box" x="16" y="78" width="532" height="96" rx="8"/>
+        <text class="t-eyebrow" x="32" y="100">HARNESS</text>
+        <text class="t-body" x="32" y="119">le corps et les outils</text>
+        <rect class="chip" x="180" y="88" width="92" height="26" rx="13"/>
+        <text class="t-chip" x="226" y="105" text-anchor="middle">optchat.py</text>
+        <rect class="chip" x="278" y="88" width="118" height="26" rx="13"/>
+        <text class="t-chip" x="337" y="105" text-anchor="middle">dsh 0.1.7-rc.2</text>
+        <rect class="chip" x="402" y="88" width="138" height="26" rx="13"/>
+        <text class="t-chip" x="471" y="105" text-anchor="middle">Pi Durable 1.0.4</text>
+        <text class="t-body" x="180" y="141">prompt → appel d'outil → résultat → nouveau prompt</text>
+        <text class="t-note" x="180" y="160">trois harness essayés cette nuit</text>
+        <!-- optchat memory -->
+        <path class="link-hi" d="M548 126H564"/>
+        <rect class="box-hi" x="564" y="78" width="180" height="96" rx="8"/>
+        <text class="t-eyebrow t-acc" x="578" y="100">MÉMOIRE</text>
+        <text class="t-title" x="578" y="121">OptChat</text>
+        <text class="t-body" x="578" y="141">décide de ce que le modèle</text>
+        <text class="t-body" x="578" y="158">voit à chaque tour</text>
+        <!-- api line -->
+        <line class="axis" x1="16" y1="192" x2="744" y2="192"/>
+        <rect class="api-bg" x="196" y="182" width="368" height="20" rx="4"/>
+        <text class="t-mono" x="380" y="196" text-anchor="middle">HTTP · 127.0.0.1:18435 · API compatible OpenAI</text>
+        <!-- engine -->
+        <rect class="box" x="16" y="210" width="532" height="92" rx="8"/>
+        <text class="t-eyebrow" x="32" y="232">MOTEUR</text>
+        <text class="t-body" x="32" y="251">fait tourner le</text>
+        <text class="t-body" x="32" y="267">modèle sur le GPU</text>
+        <text class="t-title" x="180" y="232">llama-server, fork PrismML de llama.cpp</text>
+        <text class="t-mono" x="180" y="251">prism b10743 · CUDA · ~/mitsuba/llama</text>
+        <rect class="chip" x="180" y="264" width="148" height="26" rx="13"/>
+        <text class="t-chip" x="254" y="281" text-anchor="middle">slot 0 · chat · 12k</text>
+        <rect class="chip" x="336" y="264" width="192" height="26" rx="13"/>
+        <text class="t-chip" x="432" y="281" text-anchor="middle">slot 1 · compaction · 12k</text>
+        <!-- hermes failure -->
+        <rect class="box" x="564" y="210" width="180" height="92" rx="8"/>
+        <path class="x-mark" d="M579 222l8 8M587 222l-8 8"/>
+        <text class="t-title2" x="594" y="231">llama.cpp de Hermes</text>
+        <text class="t-body" x="578" y="251">build b10964 : types ggml</text>
+        <text class="t-body" x="578" y="267">142 et 143 inconnus,</text>
+        <text class="t-body" x="578" y="283">Bonsai refusé</text>
+        <text class="t-note" x="578" y="297">échecs des 2 et 3 octobre</text>
+        <!-- brain -->
+        <rect class="box" x="16" y="314" width="532" height="52" rx="8"/>
+        <text class="t-eyebrow" x="32" y="336">CERVEAU</text>
+        <text class="t-body" x="32" y="355">le modèle</text>
+        <text class="t-title" x="180" y="336">Ternary Bonsai 2 27B</text>
+        <text class="t-mono" x="180" y="355">PTQ1_0 · 5,9 Go · base Qwen3.8 27B</text>
+        <!-- hardware -->
+        <rect class="box" x="16" y="378" width="532" height="52" rx="8"/>
+        <text class="t-eyebrow" x="32" y="400">MATÉRIEL</text>
+        <text class="t-body" x="32" y="419">la carte graphique</text>
+        <text class="t-title" x="180" y="400">RTX 3060 · 12 Go</text>
+        <rect class="meter-track" x="180" y="410" width="240" height="8" rx="4"/>
+        <rect class="meter-fill" x="180" y="410" width="146" height="8" rx="4"/>
+        <text class="t-body" x="432" y="418">7,3 Go occupés</text>
+        <!-- also tried -->
+        <rect class="box" x="564" y="314" width="180" height="116" rx="8"/>
+        <text class="t-eyebrow" x="578" y="336">AUSSI ESSAYÉ</text>
+        <text class="t-title2" x="578" y="356">Bonsai 8B (PQ2_0)</text>
+        <text class="t-body" x="578" y="376">comme compacteur :</text>
+        <text class="t-body" x="578" y="392">rappel 2/8, abandonné</text>
+        <text class="t-note" x="578" y="414">2,2 Go · ~106 tok/s</text>
+      </svg>
+    </div>
+    <figcaption>OptChat n'est pas un programme à part&nbsp;: c'est la logique qui décide du prompt, branchée dans le harness. Les tailles de fichiers viennent du disque, les 7,3&nbsp;Go d'une mesure sur serveur seul.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Le cerveau</strong>, ce sont les poids&nbsp;: Bonsai 2 27B, construit sur Qwen3.8 27B, avec des poids ternaires (trois valeurs possibles par poids).</li>
+    <li><strong>Le moteur</strong> les charge sur le GPU et répond en HTTP. Deux «&nbsp;slots&nbsp;» de 12k tokens&nbsp;: le 0 pour la conversation, le 1 pour la compaction, pour que l'une n'efface pas le cache de l'autre.</li>
+    <li><strong>Le harness</strong> est la boucle d'agent&nbsp;: contexte, appel d'outil, résultat, et on recommence. dsh et Pi Durable en sont&nbsp;; <code>optchat.py</code> a le sien, minimal.</li>
+  </ul>
+
+  <div class="aside">
+    <h3>Pourquoi Hermes n'a jamais fait tourner Bonsai</h3>
+    <p>Bonsai utilise des formats de quantification propres à PrismML (PTQ1_0, PQ2_0), que llama.cpp numérote types ggml 142 et 143. Le llama.cpp livré avec Hermes (build b10964) ne les connaît pas et refuse le fichier&nbsp;: d'où les échecs des 2 et 3 octobre. Le fork de PrismML, déjà présent dans <code>~/mitsuba/llama</code> (build prism b10743, CUDA), les connaît. Tout ce qui suit tourne sur lui, à l'adresse <code>http://127.0.0.1:18435</code>.</p>
+  </div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="optchat">
+  <h2><span class="sn">3</span>OptChat, comment ça marche</h2>
+  <p>L'idée du gist&nbsp;: un seul chat, sans fin, dont l'historique est la mémoire, sans base vectorielle. Les vieux messages sont compressés en lignes de résumé d'environ 512&nbsp;octets, rangées dans un arbre binaire. Le modèle voit une vue de taille presque fixe&nbsp;: le récent en clair, l'ancien de plus en plus résumé. S'il lui faut un détail, il «&nbsp;zoome&nbsp;» sur une ligne. Et la vue change par petites touches, pour que le début du prompt bouge rarement.</p>
+  <p>Trois fichiers&nbsp;: <code>log.jsonl</code> garde chaque message en clair sans jamais rien réécrire&nbsp;; <code>tree.jsonl</code> garde les lignes de résumé&nbsp;; <code>view.json</code> dit quelles lignes et quels messages forment la vue.</p>
+
+  <h3>L'arbre&nbsp;: chaque niveau résume deux fois plus de messages</h3>
+  <p>Une ligne L0 résume un message (ceux de 160&nbsp;caractères au plus sont recopiés tels quels, sans appel au modèle). Une L1 fusionne deux L0 voisines, une L2 deux L1, et ainsi de suite. Chaque ligne reste sous 512&nbsp;octets, quel que soit le nombre de messages couverts&nbsp;: plus on monte, plus on perd de détails.</p>
+
+  <figure class="fig">
+    <p class="fig-title">Un vrai morceau de l'arbre du banc v2&nbsp;: les messages #8 à #15</p>
+    <div class="fig-scroll">
+      <svg class="w520" viewBox="0 0 600 284" role="img" aria-labelledby="tree-t">
+        <title id="tree-t">Arbre binaire : la ligne L3 n131 couvre les messages 8 à 15, ses enfants L2 n58 et n59, puis quatre L1, huit L0 et les huit messages. Le chemin du zoom va de n131 à n58, n25, n10 puis au message 10.</title>
+        <text class="t-eyebrow" x="8" y="37">L3</text>
+        <text class="t-eyebrow" x="8" y="95">L2</text>
+        <text class="t-eyebrow" x="8" y="153">L1</text>
+        <text class="t-eyebrow" x="8" y="211">L0</text>
+        <text class="t-eyebrow" x="8" y="269">MSG</text>
+        <!-- links L3 -> L2 -->
+        <path class="link" d="M315 46L447 78"/>
+        <path class="link-hi" d="M315 46L183 78"/>
+        <!-- links L2 -> L1 -->
+        <path class="link" d="M183 104L117 136M447 104L381 136M447 104L513 136"/>
+        <path class="link-hi" d="M183 104L249 136"/>
+        <!-- links L1 -> L0 -->
+        <path class="link" d="M117 162L84 194M117 162L150 194M249 162L282 194M381 162L348 194M381 162L414 194M513 162L480 194M513 162L546 194"/>
+        <path class="link-hi" d="M249 162L216 194"/>
+        <!-- links L0 -> messages -->
+        <path class="link" d="M84 220V252M150 220V252M282 220V252M348 220V252M414 220V252M480 220V252M546 220V252"/>
+        <path class="link-hi" d="M216 220V252"/>
+        <!-- L3 -->
+        <rect class="box-hi" x="273" y="20" width="84" height="26" rx="6"/>
+        <text class="t-id" x="315" y="37" text-anchor="middle">n131</text>
+        <!-- L2 -->
+        <rect class="box-hi" x="147" y="78" width="72" height="26" rx="6"/>
+        <text class="t-id" x="183" y="95" text-anchor="middle">n58</text>
+        <rect class="box" x="411" y="78" width="72" height="26" rx="6"/>
+        <text class="t-id" x="447" y="95" text-anchor="middle">n59</text>
+        <!-- L1 -->
+        <rect class="box" x="87" y="136" width="60" height="26" rx="6"/>
+        <text class="t-id" x="117" y="153" text-anchor="middle">n24</text>
+        <rect class="box-hi" x="219" y="136" width="60" height="26" rx="6"/>
+        <text class="t-id" x="249" y="153" text-anchor="middle">n25</text>
+        <rect class="box" x="351" y="136" width="60" height="26" rx="6"/>
+        <text class="t-id" x="381" y="153" text-anchor="middle">n36</text>
+        <rect class="box" x="483" y="136" width="60" height="26" rx="6"/>
+        <text class="t-id" x="513" y="153" text-anchor="middle">n37</text>
+        <!-- L0 -->
+        <rect class="box" x="58" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="84" y="211" text-anchor="middle">n8</text>
+        <rect class="box" x="124" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="150" y="211" text-anchor="middle">n9</text>
+        <rect class="box-hi" x="190" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="216" y="211" text-anchor="middle">n10</text>
+        <rect class="box" x="256" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="282" y="211" text-anchor="middle">n11</text>
+        <rect class="box" x="322" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="348" y="211" text-anchor="middle">n12</text>
+        <rect class="box" x="388" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="414" y="211" text-anchor="middle">n13</text>
+        <rect class="box" x="454" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="480" y="211" text-anchor="middle">n14</text>
+        <rect class="box" x="520" y="194" width="52" height="26" rx="6"/>
+        <text class="t-id" x="546" y="211" text-anchor="middle">n15</text>
+        <!-- messages -->
+        <rect class="box" x="62" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="84" y="268" text-anchor="middle">#8</text>
+        <rect class="box" x="128" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="150" y="268" text-anchor="middle">#9</text>
+        <rect class="box-hi" x="194" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="216" y="268" text-anchor="middle">#10</text>
+        <rect class="box" x="260" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="282" y="268" text-anchor="middle">#11</text>
+        <rect class="box" x="326" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="348" y="268" text-anchor="middle">#12</text>
+        <rect class="box" x="392" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="414" y="268" text-anchor="middle">#13</text>
+        <rect class="box" x="458" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="480" y="268" text-anchor="middle">#14</text>
+        <rect class="box" x="524" y="252" width="44" height="24" rx="5"/>
+        <text class="t-id" x="546" y="268" text-anchor="middle">#15</text>
+        <!-- zoom steps -->
+        <circle class="step" cx="249" cy="62" r="8"/>
+        <text class="t-step" x="249" y="66" text-anchor="middle">1</text>
+        <circle class="step" cx="216" cy="120" r="8"/>
+        <text class="t-step" x="216" y="124" text-anchor="middle">2</text>
+        <circle class="step" cx="232.5" cy="178" r="8"/>
+        <text class="t-step" x="232.5" y="182" text-anchor="middle">3</text>
+        <circle class="step" cx="216" cy="236" r="8"/>
+        <text class="t-step" x="216" y="240" text-anchor="middle">4</text>
+      </svg>
+    </div>
+    <ol class="trace" aria-label="Les quatre zooms">
+      <li><span class="k">1</span><span><code>zoom("n131")</code> → n58 (L2, #8–#11, 268&nbsp;o) et n59 (L2, #12–#15, 294&nbsp;o)</span></li>
+      <li><span class="k">2</span><span><code>zoom("n58")</code> → n24 (L1, #8–#9, 96&nbsp;o) et n25 (L1, #10–#11, 171&nbsp;o)</span></li>
+      <li><span class="k">3</span><span><code>zoom("n25")</code> → n10 (L0, #10, 111&nbsp;o) et n11 (L0, #11, 56&nbsp;o)</span></li>
+      <li><span class="k">4</span><span><code>zoom("n10")</code> → le message d'origine&nbsp;: «&nbsp;Le serveur de prod du projet Atlas est 10.0.3.47, et on y accède en SSH sur le port 2222.&nbsp;»</span></li>
+    </ol>
+    <p class="label-sm">La ligne n131 telle que le modèle la lit dans son digest (353&nbsp;octets pour 8&nbsp;messages)&nbsp;:</p>
+    <pre class="wrap"><code>[n131 L3 #8-#15 10-07 22:20] L'utilisateur demande un synonyme du mot 'rapide' (réponse 'vite') et indique que le serveur de prod du projet Atlas est 10.0.3.47, accessible en SSH sur le port 2222, l'assistant confirme la prise en note de ces informations, puis l'utilisateur demande le résultat de 17 fois 23 en précisant de répondre juste le nombre, l'assistant répondant 391.</code></pre>
+    <figcaption>Ici, la valeur 2222 a survécu jusqu'au niveau L3&nbsp;: au banc, le modèle a répondu sans zoomer. Le zoom sert quand une valeur a disparu du résumé.</figcaption>
+  </figure>
+
+  <h3>La vue&nbsp;: grossier à gauche, fin à droite</h3>
+  <p>Voici la vue enregistrée à la fin du banc v2 (<code>view.json</code>), du plus ancien au plus récent. Survole un bloc pour lire sa ligne.</p>
+
+  <figure class="fig" id="view-fig">
+    <p class="fig-title">La vue réelle à la fin du banc v2</p>
+    <ul class="legend" aria-hidden="true">
+      <li><span class="sw sw-lv"></span>lignes de résumé, de L0 (clair) à L3 (foncé)</li>
+      <li><span class="sw sw-s2"></span>messages en clair</li>
+    </ul>
+    <div class="fig-scroll" id="view-svg"></div>
+    <figcaption>102 messages couverts par 42 éléments. Le modèle reçoit les 30 lignes de résumé (environ 5,7&nbsp;Ko de texte, calculé sur <code>run/data_v2</code>) puis les 12 derniers messages en clair.</figcaption>
+  </figure>
+
+  <h3>Le prompt de chaque tour</h3>
+  <p>Chaque tour est un appel neuf au modèle. Le digest va dans un message utilisateur séparé, pas dans le prompt système&nbsp;: le prompt système et les outils (654&nbsp;tokens) forment ainsi un début qui ne change jamais.</p>
+
+  <figure class="fig">
+    <p class="fig-title">Anatomie d'un prompt, vers 80 messages de conversation</p>
+    <div class="fig-scroll">
+      <svg class="w640" viewBox="0 0 760 124" role="img" aria-labelledby="prompt-t">
+        <title id="prompt-t">Le prompt : système et outils, 654 tokens, identiques à chaque tour ; digest, environ 1 500 tokens, qui change aux promotions ; messages récents et nouveau message, qui grandissent par ajout à la fin.</title>
+        <text class="t-panel" x="20" y="22">système + outils</text>
+        <text class="t-note" x="20" y="36">654 tokens</text>
+        <text class="t-panel" x="183" y="22">digest &lt;memory&gt; + « Compris »</text>
+        <text class="t-note" x="183" y="36">≈ 1 500 tokens</text>
+        <text class="t-panel" x="555" y="22">messages récents</text>
+        <text class="t-note" x="555" y="36">+ ton nouveau message</text>
+        <rect class="seg-sys" x="20" y="44" width="160" height="36" rx="3"/>
+        <rect class="seg-dig" x="182" y="44" width="371" height="36" rx="3"/>
+        <rect class="seg-raw" x="555" y="44" width="185" height="36" rx="3"/>
+        <text class="t-body" x="20" y="100">identique à chaque tour</text>
+        <text class="t-note" x="20" y="115">toujours repris du cache</text>
+        <text class="t-body" x="183" y="100">change seulement aux promotions</text>
+        <text class="t-note" x="183" y="115">tous les 4 à 5 tours au banc v2</text>
+        <text class="t-body" x="555" y="100">grandit à chaque tour</text>
+        <text class="t-note" x="555" y="115">par simple ajout à la fin</text>
+      </svg>
+    </div>
+    <figcaption>Proportions approchées&nbsp;: prompt total d'environ 2&#8239;900&nbsp;tokens dont un digest d'environ 1&#8239;500 (ordres de grandeur du README).</figcaption>
+  </figure>
+
+  <h3>Les lots, ou hystérésis</h3>
+  <div class="split">
+    <div>
+      <p>Quand la vue change, le prompt change à l'endroit du digest et le serveur doit relire tout ce qui suit (section&nbsp;4). Donc on ne touche pas la vue à chaque tour. La zone en clair grossit jusqu'à dépasser 12&nbsp;messages, puis on en résume d'un coup assez pour redescendre à 4. Même règle à chaque niveau de l'arbre&nbsp;: au-delà de 12&nbsp;lignes, on fusionne les plus anciennes par paires jusqu'à revenir à 8.</p>
+      <p>Au banc v2, ça donne 9&nbsp;changements de vue en 46&nbsp;tours, un tous les 4 à 5&nbsp;tours. Les autres tours ajoutent seulement à la fin du prompt.</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 380 200" role="img" aria-labelledby="saw-t">
+        <title id="saw-t">Schéma en dents de scie : les messages en clair montent de 4 à 14, puis retombent à 4 à chaque promotion, tous les 5 tours.</title>
+        <text class="t-panel" x="40" y="18">messages en clair dans la vue</text>
+        <line class="grid" x1="40" y1="160" x2="256" y2="160"/>
+        <line class="grid" x1="40" y1="92" x2="256" y2="92"/>
+        <line class="axis" x1="40" y1="58" x2="256" y2="58"/>
+        <line class="axis" x1="40" y1="126" x2="256" y2="126"/>
+        <text class="t-tick" x="32" y="164" text-anchor="end">0</text>
+        <text class="t-tick" x="32" y="130" text-anchor="end">4</text>
+        <text class="t-tick" x="32" y="96" text-anchor="end">8</text>
+        <text class="t-tick" x="32" y="62" text-anchor="end">12</text>
+        <text class="t-body" x="264" y="56">plus de 12 :</text>
+        <text class="t-body" x="264" y="71">on résume</text>
+        <text class="t-body" x="264" y="124">on retombe</text>
+        <text class="t-body" x="264" y="139">à 4</text>
+        <path class="saw" d="M40 126L112 41V126L184 41V126L256 41V126"/>
+        <circle class="dot" cx="112" cy="126" r="5"/>
+        <circle class="dot" cx="184" cy="126" r="5"/>
+        <circle class="dot" cx="256" cy="126" r="5"/>
+        <text class="t-note" x="112" y="146" text-anchor="middle">la vue change</text>
+        <text class="t-tick" x="40" y="178" text-anchor="middle">0</text>
+        <text class="t-tick" x="112" y="178" text-anchor="middle">5</text>
+        <text class="t-tick" x="184" y="178" text-anchor="middle">10</text>
+        <text class="t-tick" x="256" y="178" text-anchor="middle">15</text>
+        <text class="t-note" x="256" y="194" text-anchor="end">tours</text>
+      </svg>
+      <figcaption>Schéma, pas une mesure&nbsp;: 2&nbsp;messages par tour, sans appel d'outil.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Le zoom, et la compaction en arrière-plan</h3>
+  <p><code>zoom(id)</code> ouvre une ligne sur ses deux enfants, ou sur le message d'origine pour une L0&nbsp;; <code>read_message(n)</code> lit un message entier. Le 27B zoome peu&nbsp;: quand la valeur exacte a survécu dans le résumé, il répond directement (une question sur huit a demandé un zoom aux bancs v2 et v4).</p>
+  <p>La compaction (résumer, fusionner) tourne dans un thread après chaque réponse, pendant que tu lis et tapes. Elle utilise le slot&nbsp;1, pour ne jamais effacer le cache de la conversation.</p>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="mesures">
+  <h2><span class="sn">4</span>Ce qui a été mesuré</h2>
+  <p>Le banc (<code>bench.py</code>) plante 8 faits inventés au début d'une conversation (un chat nommé Pixel, un port SSH, un choix de base de données, un rendez-vous…), ajoute des questions de remplissage pour les pousser au fond de l'arbre, puis pose 8 questions de rappel. 46 à 48&nbsp;tours, 5 à 6&nbsp;minutes.</p>
+
+  <h3>Le coût de chaque tour</h3>
+  <figure class="fig" id="turns-fig">
+    <p class="fig-title">Banc v2, tour par tour</p>
+    <ul class="legend" aria-hidden="true">
+      <li><span class="sw sw-s1"></span>la vue a changé (promotion)</li>
+      <li><span class="sw sw-de"></span>simple ajout en fin de prompt</li>
+      <li><span class="sw sw-band"></span>phase des questions de rappel</li>
+    </ul>
+    <div class="fig-scroll" id="turns-svg"></div>
+    <figcaption>En bleu, les 9&nbsp;tours où la vue a changé&nbsp;: 1&#8239;200 à 2&#8239;700&nbsp;tokens relus, 2,8 à 5,6&nbsp;s (6,7&nbsp;s avec un zoom). En gris, les simples ajouts&nbsp;: une quarantaine de tokens, médiane 0,9&nbsp;s. Le premier tour part d'un cache presque vide. Survole une barre pour voir la question posée.</figcaption>
+    <details>
+      <summary>Voir les 46 tours en tableau</summary>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th class="num">Tour</th><th>Type</th><th class="num">Durée (s)</th><th class="num">Prompt</th><th class="num">Relus</th><th class="num">Repris</th><th class="num">Zooms</th><th>Question</th></tr></thead>
+          <tbody id="turns-tbody"></tbody>
+        </table>
+      </div>
+    </details>
+  </figure>
+
+  <h3>Le rappel, question par question</h3>
+  <figure class="fig" id="recall-fig">
+    <p class="fig-title">8 faits plantés 24 à 40 tours plus tôt, trois bancs</p>
+    <div class="tbl-wrap" style="margin:0;border:0;border-radius:0;background:none">
+      <table class="recall">
+        <thead>
+          <tr>
+            <th scope="col" style="text-align:left;padding-left:14px">Banc</th>
+            <th scope="col">Pixel<small>nom du chat</small></th>
+            <th scope="col">2222<small>port SSH</small></th>
+            <th scope="col">PostgreSQL<small>base choisie</small></th>
+            <th scope="col">Marchetti, 15/11<small>qui et quand</small></th>
+            <th scope="col">.env.ci<small>fichier du token</small></th>
+            <th scope="col">650&nbsp;€<small>budget GPU</small></th>
+            <th scope="col">9h15<small>dentiste</small></th>
+            <th scope="col">#3FA7D6<small>couleur du bot</small></th>
+            <th scope="col">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">v2<small>compacteur 27B</small></th>
+            <td><span class="rmark ok" tabindex="0" data-q="Comment s'appelle mon chat ?" data-a="« Pixel. »" data-s="6,74 s · 1 zoom · 2 tours d'outils"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quel est le port SSH du serveur de prod d'Atlas ?" data-a="« 2222 »" data-s="0,61 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quelle base de données ai-je choisie pour Atlas, et pourquoi ?" data-a="« PostgreSQL, à cause des transactions. »" data-s="0,76 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Qui reprend le module de facturation, et quand ?" data-a="« Inès Marchetti, à partir du 15 novembre. »" data-s="1,01 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Dans quel fichier se trouve ATLAS_BUILD_KEY ?" data-a="« Dans le fichier .env.ci. »" data-s="5,50 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quel est mon budget max pour le GPU ?" data-a="« 650 euros. »" data-s="0,63 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="À quelle heure est mon rendez-vous chez le dentiste ?" data-a="« 9h15. »" data-s="0,64 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quelle est la couleur d'embed du bot Discord ?" data-a="« #3FA7D6 »" data-s="0,68 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td class="total">8/8</td>
+          </tr>
+          <tr>
+            <th scope="row">v3<small>compacteur 8B</small></th>
+            <td><span class="rmark ok" tabindex="0" data-q="Comment s'appelle mon chat ?" data-a="« Pixel »" data-s="0,68 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark miss" tabindex="0" data-q="Quel est le port SSH du serveur de prod d'Atlas ?" data-a="« Je n'ai pas d'information sur le port SSH du serveur de prod d'Atlas dans ma mémoire. »" data-s="4,80 s · 1 zoom · 2 tours d'outils"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg><span class="vh">raté</span></span><span class="why">pas d'info</span></td>
+            <td><span class="rmark miss" tabindex="0" data-q="Quelle base de données ai-je choisie pour Atlas, et pourquoi ?" data-a="Arrêt du programme : trop de tours d'outils" data-s="46,98 s, dont 12,77 s d'attente de compaction · 1 zoom · 6 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg><span class="vh">raté</span></span><span class="why">boucle</span></td>
+            <td><span class="rmark miss" tabindex="0" data-q="Qui reprend le module de facturation, et quand ?" data-a="Arrêt du programme : trop de tours d'outils" data-s="31,71 s · 0 zoom (lectures de messages) · 6 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg><span class="vh">raté</span></span><span class="why">boucle</span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Dans quel fichier se trouve ATLAS_BUILD_KEY ?" data-a="« Le token de build ATLAS_BUILD_KEY se trouve dans le fichier .env.ci (pas dans .env). »" data-s="59,67 s, dont 14,50 s d'attente de compaction · 2 zooms · 4 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark miss" tabindex="0" data-q="Quel est mon budget max pour le GPU ?" data-a="Arrêt du programme : trop de tours d'outils" data-s="37,29 s, dont 22,86 s d'attente de compaction · 4 zooms · 6 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg><span class="vh">raté</span></span><span class="why">boucle</span></td>
+            <td><span class="rmark miss" tabindex="0" data-q="À quelle heure est mon rendez-vous chez le dentiste ?" data-a="Arrêt du programme : trop de tours d'outils" data-s="17,27 s · 1 zoom · 6 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg><span class="vh">raté</span></span><span class="why">boucle</span></td>
+            <td><span class="rmark miss" tabindex="0" data-q="Quelle est la couleur d'embed du bot Discord ?" data-a="Arrêt du programme : trop de tours d'outils" data-s="26,56 s, dont 11,64 s d'attente de compaction · 0 zoom · 6 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg><span class="vh">raté</span></span><span class="why">boucle</span></td>
+            <td class="total">2/8</td>
+          </tr>
+          <tr>
+            <th scope="row">v4<small>compacteur 27B</small></th>
+            <td><span class="rmark ok" tabindex="0" data-q="Comment s'appelle mon chat ?" data-a="« Pixel »" data-s="0,53 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quel est le port SSH du serveur de prod d'Atlas ?" data-a="« 2222 »" data-s="4,92 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quelle base de données ai-je choisie pour Atlas, et pourquoi ?" data-a="« PostgreSQL, à cause des transactions. »" data-s="41,03 s, dont 35,72 s d'attente de compaction · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Qui reprend le module de facturation, et quand ?" data-a="« Inès Marchetti, à partir du 15 novembre. »" data-s="0,97 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Dans quel fichier se trouve ATLAS_BUILD_KEY ?" data-a="« Dans le fichier .env.ci. »" data-s="0,74 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quel est mon budget max pour le GPU ?" data-a="« 650 euros. »" data-s="0,71 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="À quelle heure est mon rendez-vous chez le dentiste ?" data-a="« 9h15. »" data-s="0,66 s · sans zoom"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td><span class="rmark ok" tabindex="0" data-q="Quelle est la couleur d'embed du bot Discord ?" data-a="« #3FA7D6 »" data-s="34,99 s, dont 27,71 s d'attente de compaction · 1 zoom · 2 tours"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg><span class="vh">trouvé</span></span></td>
+            <td class="total">8/8</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption>Carré plein&nbsp;: réponse juste. Carré vide&nbsp;: raté, avec la raison. Survole une case pour lire la réponse et le temps. Le banc v1, non montré, avait aussi 8/8, mais avec des résumés en anglais.</figcaption>
+    <details>
+      <summary>Voir les 24 réponses en tableau</summary>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Banc</th><th>Question</th><th>Réponse</th><th class="num">Zooms</th><th class="num">Tours</th><th class="num">Durée (s)</th></tr></thead>
+          <tbody>
+            <tr><td>v2</td><td>Comment s'appelle mon chat&nbsp;?</td><td>Pixel.</td><td class="num">1</td><td class="num">2</td><td class="num">6,74</td></tr>
+            <tr><td>v2</td><td>Port SSH du serveur de prod d'Atlas&nbsp;?</td><td>2222</td><td class="num">0</td><td class="num">1</td><td class="num">0,61</td></tr>
+            <tr><td>v2</td><td>Base de données choisie, et pourquoi&nbsp;?</td><td>PostgreSQL, à cause des transactions.</td><td class="num">0</td><td class="num">1</td><td class="num">0,76</td></tr>
+            <tr><td>v2</td><td>Qui reprend la facturation, et quand&nbsp;?</td><td>Inès Marchetti, à partir du 15 novembre.</td><td class="num">0</td><td class="num">1</td><td class="num">1,01</td></tr>
+            <tr><td>v2</td><td>Fichier d'ATLAS_BUILD_KEY&nbsp;?</td><td>Dans le fichier <code>.env.ci</code>.</td><td class="num">0</td><td class="num">1</td><td class="num">5,50</td></tr>
+            <tr><td>v2</td><td>Budget max pour le GPU&nbsp;?</td><td>650 euros.</td><td class="num">0</td><td class="num">1</td><td class="num">0,63</td></tr>
+            <tr><td>v2</td><td>Heure du dentiste&nbsp;?</td><td>9h15.</td><td class="num">0</td><td class="num">1</td><td class="num">0,64</td></tr>
+            <tr><td>v2</td><td>Couleur d'embed du bot Discord&nbsp;?</td><td>#3FA7D6</td><td class="num">0</td><td class="num">1</td><td class="num">0,68</td></tr>
+            <tr><td>v3</td><td>Comment s'appelle mon chat&nbsp;?</td><td>Pixel</td><td class="num">0</td><td class="num">1</td><td class="num">0,68</td></tr>
+            <tr><td>v3</td><td>Port SSH du serveur de prod d'Atlas&nbsp;?</td><td>Raté&nbsp;: «&nbsp;Je n'ai pas d'information…&nbsp;»</td><td class="num">1</td><td class="num">2</td><td class="num">4,80</td></tr>
+            <tr><td>v3</td><td>Base de données choisie, et pourquoi&nbsp;?</td><td>Raté&nbsp;: arrêt, trop de tours d'outils</td><td class="num">1</td><td class="num">6</td><td class="num">46,98</td></tr>
+            <tr><td>v3</td><td>Qui reprend la facturation, et quand&nbsp;?</td><td>Raté&nbsp;: arrêt, trop de tours d'outils</td><td class="num">0</td><td class="num">6</td><td class="num">31,71</td></tr>
+            <tr><td>v3</td><td>Fichier d'ATLAS_BUILD_KEY&nbsp;?</td><td>Dans <code>.env.ci</code> (pas dans <code>.env</code>).</td><td class="num">2</td><td class="num">4</td><td class="num">59,67</td></tr>
+            <tr><td>v3</td><td>Budget max pour le GPU&nbsp;?</td><td>Raté&nbsp;: arrêt, trop de tours d'outils</td><td class="num">4</td><td class="num">6</td><td class="num">37,29</td></tr>
+            <tr><td>v3</td><td>Heure du dentiste&nbsp;?</td><td>Raté&nbsp;: arrêt, trop de tours d'outils</td><td class="num">1</td><td class="num">6</td><td class="num">17,27</td></tr>
+            <tr><td>v3</td><td>Couleur d'embed du bot Discord&nbsp;?</td><td>Raté&nbsp;: arrêt, trop de tours d'outils</td><td class="num">0</td><td class="num">6</td><td class="num">26,56</td></tr>
+            <tr><td>v4</td><td>Comment s'appelle mon chat&nbsp;?</td><td>Pixel</td><td class="num">0</td><td class="num">1</td><td class="num">0,53</td></tr>
+            <tr><td>v4</td><td>Port SSH du serveur de prod d'Atlas&nbsp;?</td><td>2222</td><td class="num">0</td><td class="num">1</td><td class="num">4,92</td></tr>
+            <tr><td>v4</td><td>Base de données choisie, et pourquoi&nbsp;?</td><td>PostgreSQL, à cause des transactions.</td><td class="num">0</td><td class="num">1</td><td class="num">41,03</td></tr>
+            <tr><td>v4</td><td>Qui reprend la facturation, et quand&nbsp;?</td><td>Inès Marchetti, à partir du 15 novembre.</td><td class="num">0</td><td class="num">1</td><td class="num">0,97</td></tr>
+            <tr><td>v4</td><td>Fichier d'ATLAS_BUILD_KEY&nbsp;?</td><td>Dans le fichier <code>.env.ci</code>.</td><td class="num">0</td><td class="num">1</td><td class="num">0,74</td></tr>
+            <tr><td>v4</td><td>Budget max pour le GPU&nbsp;?</td><td>650 euros.</td><td class="num">0</td><td class="num">1</td><td class="num">0,71</td></tr>
+            <tr><td>v4</td><td>Heure du dentiste&nbsp;?</td><td>9h15.</td><td class="num">0</td><td class="num">1</td><td class="num">0,66</td></tr>
+            <tr><td>v4</td><td>Couleur d'embed du bot Discord&nbsp;?</td><td>#3FA7D6</td><td class="num">1</td><td class="num">2</td><td class="num">34,99</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </figure>
+  <p>Avec le 8B comme compacteur (v3), deux faits seulement survivent&nbsp;: les lignes fusionnées ont perdu les valeurs, alors le 27B lit les messages un par un, épuise ses tours d'outils et s'arrête sans répondre (5 des 6&nbsp;échecs). Les longues durées de v4 sont surtout de l'attente de compaction (plus bas).</p>
+
+  <h3>La machine</h3>
+  <div class="tbl-wrap">
+    <table class="measures">
+      <thead><tr><th>Mesure</th><th>Valeur</th><th>D'où ça vient</th></tr></thead>
+      <tbody>
+        <tr><td>VRAM&nbsp;: Bonsai 27B, 2 slots de 12k, cache KV q8</td><td><strong>7,3&nbsp;Go</strong> (7&#8239;268&nbsp;Mio)</td><td class="src">serveur seul, <code>run/flag_experiment.log</code></td></tr>
+        <tr><td>Lecture du prompt (prefill), 27B</td><td>~300&nbsp;tok/s sur un prompt court, ~600&nbsp;tok/s sur un long</td><td class="src"><code>run/compare.log</code>, <code>run/exp_*.log</code></td></tr>
+        <tr><td>Génération, 27B</td><td>~24&nbsp;tok/s</td><td class="src">bancs et sondes</td></tr>
+        <tr><td>Génération, Bonsai 8B</td><td>~106&nbsp;tok/s</td><td class="src"><code>run/compare.log</code></td></tr>
+        <tr><td>Tour quand le cache sert</td><td>~1&nbsp;s (médiane 0,9&nbsp;s au banc v2)</td><td class="src">bancs v1 et v2</td></tr>
+        <tr><td>Tour où le digest change</td><td>4,5 à 5&nbsp;s en moyenne</td><td class="src">bancs v1 et v2</td></tr>
+        <tr><td>Prompt total vers 80 messages</td><td>~2,9k tokens, dont ~1,5k de digest</td><td class="src"><code>README.md</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">Les autres mesures de VRAM notées pendant la soirée étaient faussées par des serveurs fantômes (section&nbsp;5) et ne sont pas reprises ici.</p>
+
+  <h3>Le cache d'un modèle hybride, en clair</h3>
+  <p>C'est la découverte technique de la nuit, et elle explique la conception. Qwen3.8, la base de Bonsai, mélange deux sortes de couches. L'attention garde une fiche par token lu&nbsp;: on peut reprendre n'importe où. Les couches récurrentes (SSM) gardent un seul état qui résume tout ce qu'elles ont lu, comme un compteur qu'on ne peut pas rembobiner&nbsp;: pour revenir en arrière, le serveur repart d'une copie de cet état prise plus tôt et relit tout depuis là.</p>
+
+  <figure class="fig">
+    <p class="fig-title">Ce que le serveur reprend du cache, et ce qu'il relit</p>
+    <ul class="legend" aria-hidden="true">
+      <li><span class="sw sw-s1"></span>repris du cache</li>
+      <li><span class="sw sw-s2"></span>relu (recalculé)</li>
+    </ul>
+    <div class="fig-scroll">
+      <svg class="w640" viewBox="0 0 760 244" role="img" aria-labelledby="cache-t">
+        <title id="cache-t">Trois cas. Dernier mot changé : 1 651 tokens repris, 516 relus. Un mot changé au milieu : 654 repris, 1 515 relus au lieu d'environ 810. Message ajouté à la fin : 1 399 repris, 41 relus.</title>
+        <!-- row 1 -->
+        <text class="t-title2" x="0" y="44">Dernier mot changé</text>
+        <text class="t-note" x="0" y="60">prompt de 2 167 tokens</text>
+        <rect class="seg-s1" x="170" y="34" width="424.3" height="24" rx="3"/>
+        <rect class="seg-s2" x="596.3" y="34" width="133.2" height="24" rx="3"/>
+        <line class="tickmark" x1="727" y1="27" x2="727" y2="33"/>
+        <text class="t-note" x="729.5" y="23" text-anchor="end">modifié ici</text>
+        <text class="t-body" x="170" y="76">1 651 repris</text>
+        <text class="t-body" x="729.5" y="76" text-anchor="end">516 relus</text>
+        <!-- row 2 -->
+        <text class="t-title2" x="0" y="122">Un mot changé</text>
+        <text class="t-note" x="0" y="138">au milieu (comme le digest)</text>
+        <rect class="seg-s1" x="170" y="112" width="166.9" height="24" rx="3"/>
+        <rect class="seg-s2" x="338.9" y="112" width="391.1" height="24" rx="3"/>
+        <line class="tickmark" x1="520.9" y1="105" x2="520.9" y2="111"/>
+        <text class="t-note" x="520.9" y="101" text-anchor="middle">modifié ici</text>
+        <text class="t-body" x="170" y="154">654 repris : le prompt système</text>
+        <text class="t-body" x="730" y="154" text-anchor="end">1 515 relus (idéal : ~810)</text>
+        <!-- row 3 -->
+        <text class="t-title2" x="0" y="200">Message ajouté</text>
+        <text class="t-note" x="0" y="216">à la fin (banc v2, tour 5)</text>
+        <rect class="seg-s1" x="170" y="190" width="359.2" height="24" rx="3"/>
+        <rect class="seg-s2" x="531.2" y="190" width="10.6" height="24" rx="2"/>
+        <line class="tickmark" x1="536.5" y1="183" x2="536.5" y2="189"/>
+        <text class="t-note" x="536.5" y="179" text-anchor="middle">ajouté ici</text>
+        <text class="t-body" x="170" y="232">1 399 repris</text>
+        <text class="t-body" x="550" y="207">41 relus</text>
+      </svg>
+    </div>
+    <figcaption>Lignes 1 et 2&nbsp;: sonde sur serveur neuf, même échelle de tokens partout (<code>run/flag_experiment.log</code>). Ligne 3&nbsp;: tour 5 du banc v2.</figcaption>
+  </figure>
+
+  <p>Ajouter à la fin coûte quelques dizaines de tokens. Changer le tout dernier mot fait relire environ 512&nbsp;tokens (516 mesurés). Changer un mot au milieu fait reculer jusqu'à la fin du prompt système&nbsp;: 1&#8239;515&nbsp;tokens relus, au lieu des quelque 810 qui suivent la modification.</p>
+  <p>Aucun réglage n'y change rien. Trois configurations relancées proprement en fin de soirée donnent les mêmes chiffres au token près&nbsp;: réglages de base, sans <code>--cache-reuse</code> (que le serveur désactive de toute façon pour ce modèle), et avec des points de sauvegarde rapprochés (<code>--ctx-checkpoints 64 --checkpoint-min-step 256</code>). D'où l'hystérésis&nbsp;: un digest qui bouge rarement.</p>
+  <p class="note">Dans les bancs, lancés plus tôt sur le serveur d'origine, la reprise s'est faite à 181&nbsp;tokens au lieu de 654. Je n'ai pas d'explication. L'écart (environ 470&nbsp;tokens, donc à peu près 1&nbsp;s à 500&nbsp;tok/s, estimation) ne change pas la conclusion.</p>
+
+  <h3>Ce que coûte la compaction</h3>
+  <p>Le coût n'est pas de lire, c'est d'écrire les résumés&nbsp;: environ 5&#8239;000&nbsp;tokens générés par 48&nbsp;tours, à 24&nbsp;tok/s, soit ~190&nbsp;s de GPU. Grouper les appels n'y change rien&nbsp;: entre v2 et v4, recopier les messages courts tels quels a fait passer les appels de 41 à 16 (88 lignes L0 sur 90 sans appel au modèle), mais le temps total est resté proche de 200&nbsp;s.</p>
+  <div class="tbl-wrap" style="max-width:640px">
+    <table>
+      <thead><tr><th>Banc</th><th>Compacteur</th><th class="num">Appels au modèle</th><th class="num">Temps de compaction</th></tr></thead>
+      <tbody>
+        <tr><td>v2</td><td>Bonsai 27B, slot 1</td><td class="num">41</td><td class="num">206&nbsp;s</td></tr>
+        <tr><td>v3</td><td>Bonsai 8B, 2<sup>e</sup> serveur</td><td class="num">33</td><td class="num">101&nbsp;s</td></tr>
+        <tr><td>v4</td><td>Bonsai 27B, slot 1</td><td class="num">16</td><td class="num">190&nbsp;s</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Le banc enchaîne les questions sans pause, donc ce temps se voit&nbsp;: en v4, 8&nbsp;tours ont attendu de 7 à 36&nbsp;s la fin de la compaction précédente (temps bruités, section&nbsp;5). En usage réel, elle tourne pendant que tu lis et réponds&nbsp;; elle ne devrait se voir que si tu réponds plus vite qu'elle. C'est une estimation, pas une mesure.</p>
+</section>
+
+<!-- ============================================================ 5 -->
+<section id="rate">
+  <h2><span class="sn">5</span>Ce qui a raté, et ce qui a été corrigé</h2>
+  <p>Rien de grave, mais il faut que tu saches ce qui a cloché pour savoir quels chiffres croire.</p>
+
+  <ul class="incidents">
+    <li class="incident">
+      <span class="st"><svg viewBox="0 0 14 14" aria-hidden="true"><circle class="ico-bg-ok" cx="7" cy="7" r="7"/><path class="ico-fg" d="M4 7.2l2 2 4-4.4"/></svg>corrigé</span>
+      <div>
+        <h3>Les premiers résumés étaient en anglais, et confondaient qui parle</h3>
+        <p>Banc v1&nbsp;: rappel 8/8, mais des résumés en anglais, des propos de l'assistant attribués à l'utilisateur, des balises recopiées. Le prompt du compacteur a été réécrit&nbsp;: français, «&nbsp;L'utilisateur…&nbsp;» ou «&nbsp;L'assistant…&nbsp;» explicites, valeurs exactes jamais reformulées. Banc v2&nbsp;: 8/8 avec des résumés propres.</p>
+      </div>
+    </li>
+    <li class="incident">
+      <span class="st"><svg viewBox="0 0 14 14" aria-hidden="true"><circle class="ico-bg-x" cx="7" cy="7" r="7"/><path class="ico-fg" d="M4.6 4.6l4.8 4.8M9.4 4.6l-4.8 4.8"/></svg>abandonné</span>
+      <div>
+        <h3>Le Bonsai 8B comme compacteur</h3>
+        <p>L'idée&nbsp;: décharger le 27B sur un petit modèle rapide (106&nbsp;tok/s contre 24). Sur un test isolé, le 8B recopie au lieu de résumer. On lui demande de fusionner deux paires de lignes&nbsp;; il rend les deux lignes de la première paire et oublie la seconde&nbsp;:</p>
+        <div class="vs">
+          <div><b>27B, deux fusions</b><p>«&nbsp;L'utilisateur indique que le serveur de prod du projet Atlas est 10.0.3.47, SSH sur le port 2222, ce que l'assistant confirme.&nbsp;»</p><p>«&nbsp;L'utilisateur demande la différence entre TCP et UDP en une phrase, l'assistant explique que TCP est orienté connexion et fiable, UDP sans connexion et plus rapide.&nbsp;»</p></div>
+          <div><b>8B, même demande</b><p>«&nbsp;L'utilisateur indique que le serveur de prod du projet Atlas est 10.0.3.47, SSH sur le port 2222.&nbsp;»</p><p>«&nbsp;L'assistant confirme la prise en note de l'adresse IP et du port SSH.&nbsp;»</p><p class="lost">La paire TCP/UDP a disparu.</p></div>
+        </div>
+        <p>Au banc v3, rappel 2/8&nbsp;: le 27B reste compacteur. La variante Q2_0 du 8B ne se charge même pas sur ce build, la PQ2_0 oui. Extraits de <code>run/compare.log</code>.</p>
+      </div>
+    </li>
+    <li class="incident">
+      <span class="st"><svg viewBox="0 0 14 14" aria-hidden="true"><circle class="ico-bg-ok" cx="7" cy="7" r="7"/><path class="ico-fg" d="M4 7.2l2 2 4-4.4"/></svg>corrigé</span>
+      <div>
+        <h3>Des boucles d'outils</h3>
+        <p>Quand les résumés sont mauvais, le modèle cherche&nbsp;: il zoome, lit message après message, et épuise ses tours d'outils sans répondre. C'est arrivé 5&nbsp;fois sur les 6&nbsp;échecs du banc v3, jusqu'à 47&nbsp;s pour une question ratée. Règle ajoutée&nbsp;: le dernier tour autorisé se fait sans outils, le modèle doit répondre avec ce qu'il a.</p>
+      </div>
+    </li>
+    <li class="incident">
+      <span class="st"><svg viewBox="0 0 14 14" aria-hidden="true"><circle class="ico-bg-ok" cx="7" cy="7" r="7"/><path class="ico-fg" d="M4 7.2l2 2 4-4.4"/></svg>corrigé</span>
+      <div>
+        <h3>15 problèmes relevés par la revue de code</h3>
+        <p>Une relecture de <code>optchat.py</code> par un sous-agent (Opus) a relevé 15&nbsp;constats, tous corrigés. Les plus importants&nbsp;:</p>
+        <ul>
+          <li>aucune réparation après plantage&nbsp;: au démarrage, une dernière ligne tronquée est coupée et les messages absents de la vue y sont remis&nbsp;;</li>
+          <li><code>os.replace</code> échouait sous Windows quand un autre processus tenait le fichier&nbsp;: il réessaie&nbsp;;</li>
+          <li>le banc effaçait les données du vrai chat&nbsp;: il travaille dans <code>data_bench\</code>&nbsp;;</li>
+          <li>la zone en clair pouvait séparer un appel d'outil de son résultat&nbsp;: la coupure se fait sur un tour utilisateur&nbsp;;</li>
+          <li>les réponses groupées du compacteur étaient mal découpées&nbsp;: sortie contrainte par un schéma JSON (grammaire llama.cpp), nombre de lignes garanti&nbsp;;</li>
+          <li>plus&nbsp;: erreurs HTTP du compacteur gérées, verrou abandonné détecté (PID mort).</li>
+        </ul>
+      </div>
+    </li>
+    <li class="incident">
+      <span class="st"><svg viewBox="0 0 14 14" aria-hidden="true"><circle class="ico-bg-bad" cx="7" cy="7" r="7"/><path class="ico-fg" d="M7 3.6v4.2M7 10.3v.1"/></svg>mesures invalidées</span>
+      <div>
+        <h3>Des serveurs fantômes pendant une partie de la soirée</h3>
+        <p>Sous Git Bash, <code>taskkill /IM llama-server.exe</code> ne fait rien&nbsp;: Git Bash transforme <code>/IM</code> en chemin. Chaque «&nbsp;redémarrage&nbsp;» du serveur en a donc lancé un nouveau sans arrêter l'ancien&nbsp;: neuf processus <code>llama-server</code> trouvés au moment du ménage, et le plus ancien gardait le port. Ce bug de méthode n'a été vu qu'à la fin.</p>
+        <p>Conséquences&nbsp;: les essais avec un cache KV en f16 et avec <code>-ub 128</code> ne valent rien (pas refaits)&nbsp;; les mesures de VRAM prises entre 22h30 et 23h30 étaient gonflées (la bonne valeur est 7,3&nbsp;Go)&nbsp;; les temps du banc v4 sont bruités, d'autant que le GPU était aussi partagé avec l'essai Pi Durable. Les taux de rappel ne dépendent pas de ces temps. La découverte sur le cache tient&nbsp;: elle a été revérifiée sur serveur neuf, dans trois configurations, avec un arrêt vérifié entre chaque. Pour arrêter le serveur&nbsp;: <code>Stop-Process -Name llama-server -Force</code> en PowerShell.</p>
+      </div>
+    </li>
+    <li class="incident">
+      <span class="st"><svg viewBox="0 0 14 14" aria-hidden="true"><circle class="ico-bg-q" cx="7" cy="7" r="7"/><path class="ico-fg-dark" d="M5.2 5.4a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.3M7 10.4v.1"/></svg>non confirmé</span>
+      <div>
+        <h3>Une «&nbsp;fuite de cache&nbsp;» entre clients</h3>
+        <p>Pendant la recherche sur dsh, un sous-agent a vu le modèle citer une question du banc («&nbsp;En une phrase, c'est quoi un cache KV&nbsp;?&nbsp;») absente de la requête de dsh, et a soupçonné le cache partagé du serveur. Deux tests directs faits ensuite par la session principale n'ont trouvé aucune fuite (ils ne sont pas consignés dans les notes). La précaution reste bonne&nbsp;: un serveur par application (section&nbsp;6).</p>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="comparatif">
+  <h2><span class="sn">6</span>dsh ou Pi Durable</h2>
+  <p>C'est ta question principale&nbsp;: lequel des deux te sera le plus utile, et le plus puissant, pour faire de l'IA en local&nbsp;? Réponse courte&nbsp;: ils ne jouent pas dans la même catégorie.</p>
+
+  <div class="cols">
+    <div class="col">
+      <h4>dsh, DeepSeek Harness</h4>
+      <p class="sub">un produit</p>
+      <p>Un agent de codage complet&nbsp;: 24 outils, bac à sable Windows, sessions, compaction, sous-agents, MCP, app desktop et web, environ 300 plugins. Version candidate (0.1.7-rc.2 en npx, 0.2.0-rc.2 dans l'app).</p>
+    </div>
+    <div class="col">
+      <h4>Pi Durable, d'Earendil</h4>
+      <p class="sub">une bibliothèque</p>
+      <p>Un harness d'exécution durable&nbsp;: chaque étape est une tâche enregistrée, reprise après plantage, plusieurs clients par conversation. Pas d'interface. TypeScript, version 1.0.4 annoncée expérimentale.</p>
+    </div>
+  </div>
+
+  <h3>Le comparatif</h3>
+  <div class="tbl-wrap">
+    <table class="cmp">
+      <thead><tr><th>Critère</th><th>dsh</th><th>Pi Durable</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Tourne avec Bonsai local</th><td><strong>Oui, vérifié</strong>&nbsp;: 13 exécutions headless, outils fichiers, shell et lecture parallèle, plugin <code>zoom</code> appelé par le modèle</td><td><strong>Oui, vérifié</strong>&nbsp;: installation Windows en 27&nbsp;s, provider compatible OpenAI avec clé factice, 7 appels <code>zoom</code> en streaming sur 7 bien interprétés, tours de 1 à 5&nbsp;s (10&nbsp;s quand le digest change)</td></tr>
+        <tr><th scope="row">Reprise après plantage</th><td>Non testée (reprise de session par id seulement)</td><td><strong>Vérifiée</strong>&nbsp;: processus tué pendant la génération, requête renvoyée à l'identique au redémarrage, 4&nbsp;tokens recalculés, pas de doublon&nbsp;; tué pendant un <code>zoom</code>, outil rejoué (<code>replay: "safe"</code>), tour terminé</td></tr>
+        <tr><th scope="row">Mémoire OptChat en pratique</th><td>Outil <code>zoom</code> chargé en plugin (45 lignes)&nbsp;; la vue devrait passer par un backend de compaction</td><td><strong>Hook <code>beforeRequest</code> + digest + zoom = 200 lignes de code produit</strong>, réponses justes (2222, PostgreSQL)&nbsp;; compacteur de fond sur le 8B fonctionnel en bonus</td></tr>
+        <tr><th scope="row">Prêt à l'emploi</th><td><strong>Oui</strong>&nbsp;: agent de codage utilisable tout de suite, interface desktop</td><td>Non&nbsp;: il faut écrire l'agent (prompt, outils, boucle)</td></tr>
+        <tr><th scope="row">Coût en tokens du harness</th><td><strong>Lourd</strong>&nbsp;: 5,8k tokens d'enveloppe (24 outils + persona) sur une fenêtre de 12k&nbsp;; 2,8k avec un preset allégé</td><td>Minimal&nbsp;: seulement ce qu'on y met</td></tr>
+        <tr><th scope="row">Réécrire le contexte à chaque requête</th><td><strong>Pas de point d'accroche direct</strong>&nbsp;: seulement un backend de compaction (un message résumé remplace une tranche, doit être plus petit qu'elle, s'exécute dans le tour). OptChat approximatif, hystérésis à reconstruire</td><td><strong>Point d'accroche exact</strong>&nbsp;: hook <code>beforeRequest</code> qui reçoit toute la liste de messages et la remplace&nbsp;; tâches de fond&nbsp;; stockage JSONL append-only</td></tr>
+        <tr><th scope="row">Compaction native</th><td>Fonctionne, mais bloque le tour 10 à 30&nbsp;s et évince une partie du cache KV&nbsp;; seuil par défaut inadapté à 12k</td><td>Tâche de fond, posée au tour suivant&nbsp;; à désactiver si on fournit sa propre vue</td></tr>
+        <tr><th scope="row">Durabilité</th><td>Sessions reprises par id&nbsp;; pas de reprise d'une tâche interrompue</td><td><strong>Reprise après plantage</strong>&nbsp;: tâche interrompue rejouée depuis son point de sauvegarde, requêtes exécutées une seule fois</td></tr>
+        <tr><th scope="row">Extensibilité</th><td>Plugins puissants mais contraints&nbsp;: versions épinglées à la version exacte de dsh, import <code>@deepseek-ai/*</code> seulement depuis l'arbre du profil, pnpm</td><td>Extensions = prompt + outils + hooks + tâches, en TypeScript, API instable</td></tr>
+        <tr><th scope="row">Multi-utilisateur, bots</th><td>Un processus par prompt en headless&nbsp;; interface mono-utilisateur</td><td>Plusieurs clients attachés à une conversation&nbsp;; pensé pour des bots Slack ou GitHub</td></tr>
+        <tr><th scope="row">Maturité</th><td>Version candidate, deux versions coexistent sur la machine</td><td>1.0.4 expérimentale, changements d'API annoncés</td></tr>
+        <tr><th scope="row">Effort pour héberger OptChat</th><td>2 à 4 jours (backend de compaction + outils), résultat approximatif</td><td>0,5 à 1 jour d'essai, 2 à 4 jours pour un port complet, résultat fidèle</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">Tableau repris de <code>notes/comparatif.md</code>. Les estimations en jours sont celles des sous-agents.</p>
+
+  <h3>Ce que les essais ont vraiment fait tourner</h3>
+  <div class="cols">
+    <div class="col">
+      <h4>Essai dsh</h4>
+      <p class="sub">sous-agent Opus, 23h02 – 23h25, profil isolé (ton <code>~/.dsh</code> n'a pas été touché)</p>
+      <p class="k-label">Vérifié en le faisant tourner</p>
+      <ul class="checks">
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>13 exécutions headless contre Bonsai, toutes terminées sans erreur.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Outils appelés correctement&nbsp;: <code>glob</code>, <code>pwsh</code> (<code>Get-Date</code> dans le bac à sable Windows), <code>write</code>, <code>read</code> (4 lectures en parallèle).</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Un plugin <code>zoom</code> d'une quarantaine de lignes, installé avec <code>dsh plugin add</code> puis utilisé par Bonsai&nbsp;: «&nbsp;Théodore&nbsp;» et «&nbsp;Melon&nbsp;», justes&nbsp;; un nœud inexistant, signalé comme tel.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Compaction automatique forcée&nbsp;: 4 tentatives rejetées, puis une réussie après un appel de 25,7&nbsp;s. Résumé en anglais, avec une erreur factuelle.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Enveloppe&nbsp;: 5&#8239;835&nbsp;tokens au premier appel (24 outils + persona), 2&#8239;758 avec le preset allégé (9 outils).</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>7 à 36&nbsp;s par prompt, dont environ 3,5&nbsp;s de démarrage et d'arrêt du processus.</span></li>
+      </ul>
+      <p class="k-label">Pas testé</p>
+      <ul class="checks">
+        <li class="no"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8"/></svg><span>La reprise d'une tâche interrompue (seulement la reprise de session par id).</span></li>
+        <li class="no"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8"/></svg><span>L'app desktop elle-même.</span></li>
+        <li class="no"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8"/></svg><span>Une vraie mémoire OptChat dans dsh&nbsp;: seulement estimée, 2 à 4&nbsp;jours.</span></li>
+      </ul>
+    </div>
+    <div class="col">
+      <h4>Essai Pi Durable</h4>
+      <p class="sub">sous-agent Opus, 23h00 – 23h27, dossier <code>pi-spike\</code></p>
+      <p class="k-label">Vérifié en le faisant tourner</p>
+      <ul class="checks">
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Installation npm sous Windows&nbsp;: 26,9&nbsp;s, 90 paquets.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Bonsai branché par <code>createProvider</code> + <code>openAICompletionsApi</code>, avec une clé factice.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Hook <code>beforeRequest</code>&nbsp;: le contexte est remplacé par digest + «&nbsp;Compris.&nbsp;» + messages récents.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>7 appels <code>zoom</code> en streaming, 7 bien interprétés&nbsp;; réponses justes (2222, PostgreSQL, 10.0.3.47).</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Processus tué pendant la réponse&nbsp;: au redémarrage, requête renvoyée à l'identique, 4&nbsp;tokens recalculés, pas de doublon.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Processus tué pendant un <code>zoom</code>&nbsp;: l'outil est rejoué, le tour se termine.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Compacteur de fond sur le Bonsai 8B&nbsp;: 0,4 à 0,8&nbsp;s par ligne.</span></li>
+        <li class="yes"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7"/></svg><span>Script de 338 lignes, dont environ 200 de code produit, écrit en 25&nbsp;minutes environ.</span></li>
+      </ul>
+      <p class="k-label">Pas testé</p>
+      <ul class="checks">
+        <li class="no"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8"/></svg><span>Les longues conversations, près des 12k tokens.</span></li>
+        <li class="no"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8"/></svg><span>Le vrai compacteur arbre + hystérésis, et un plantage pendant la compaction.</span></li>
+        <li class="no"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8"/></svg><span><code>read_message</code> (jamais appelé par le modèle), SQLite, plusieurs processus.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Deux pièges, quel que soit le harness</h3>
+  <ul class="pitfalls">
+    <li><strong>Un seul client par serveur llama.cpp.</strong> Le prototype réserve ses slots (<code>id_slot</code>). Une requête qui réserve le slot&nbsp;1 prend la place d'une requête non réservée en cours sur ce slot. Celle-ci s'arrête net (au bout de 12&nbsp;tokens dans l'essai Pi), mais le serveur la déclare terminée normalement&nbsp;: Pi a enregistré une réponse coupée sans pouvoir le voir. Règle&nbsp;: un port, donc un <code>llama-server</code>, par application.</li>
+    <li><strong>Calculer la coupure une fois par tour.</strong> La limite entre «&nbsp;résumé&nbsp;» et «&nbsp;en clair&nbsp;» doit partir du message de l'utilisateur du tour courant. Sinon elle bouge à chaque appel d'outil, le début du prompt change, et le serveur relit environ 2,7k tokens à chaque fois.</li>
+  </ul>
+
+  <h3>Verdict</h3>
+  <ul>
+    <li><strong>Pour coder en local dès maintenant&nbsp;: dsh.</strong> Il marche avec Bonsai, les outils sont là, l'interface est là. Une condition&nbsp;: un preset allégé (persona + quelques outils), sinon la moitié de la fenêtre de 12k part dans l'enveloppe et il ne reste presque rien pour le code.</li>
+    <li><strong>Pour l'assistant personnel à mémoire infinie qui tourne en permanence&nbsp;: Pi Durable.</strong> Son hook <code>beforeRequest</code> est exactement l'endroit où OptChat remplace l'historique par le digest. Son stockage JSONL ressemble à <code>log.jsonl</code>, ses tâches de fond font le compacteur, et la reprise après plantage est ce qu'on veut d'un agent qui tourne la nuit. Prix à payer&nbsp;: tout écrire en TypeScript, sur une API qui bouge encore.</li>
+    <li><strong>Le plus puissant, au sens «&nbsp;ce que je peux en faire&nbsp;»&nbsp;: Pi Durable + OptChat.</strong> Sur une carte de 12&nbsp;Go, la ressource rare est la fenêtre de contexte. Pi te laisse décider de chaque token envoyé au modèle, là où dsh en consomme la moitié avant ta première question. dsh reste l'outil de codage à côté.</li>
+  </ul>
+
+  <h3>Prochaines étapes</h3>
+  <ol class="steps">
+    <li>Garder <code>optchat.py</code> comme référence&nbsp;: c'est lui qui fait 8/8.</li>
+    <li>Porter la vue et le zoom dans une extension Pi Durable, en partant de <code>pi-spike\optchat-pi.mjs</code>. Compter 2 à 3&nbsp;jours pour un port complet (estimation de l'essai pratique).</li>
+    <li>Faire un preset dsh allégé pour coder&nbsp;: l'enveloppe passe de 5&#8239;835 à 2&#8239;758&nbsp;tokens.</li>
+    <li>Essayer comme compacteur un petit modèle instruct non ternaire (piste du README&nbsp;: Qwen3-4B en Q4), et des lignes de résumé plus courtes, pour réduire les ~190&nbsp;s de génération.</li>
+    <li>Réévaluer dsh quand une version stable offrira un point d'accroche par requête, ou une compaction qui ne bloque pas le tour.</li>
+  </ol>
+</section>
+
+<!-- ============================================================ 7 -->
+<section id="fichiers">
+  <h2><span class="sn">7</span>Fichiers et comment relancer</h2>
+  <p>Le PC a été éteint en fin de session, comme tu l'avais demandé. Le serveur <code>llama-server</code> ne tourne donc plus&nbsp;: relance-le avant tout le reste, avec <code>start_servers.sh</code>.</p>
+<pre><code><span class="c"># 1. Démarrer le moteur (Git Bash, dans C:\Users\abdou\apothicaire\optchat), puis attendre ~15 s</span>
+bash start_servers.sh
+curl http://127.0.0.1:18435/health
+
+<span class="c"># 2. Discuter avec la mémoire OptChat</span>
+python optchat.py chat
+
+<span class="c"># Voir la mémoire telle que le modèle la reçoit, ou repartir de zéro</span>
+python optchat.py view
+python optchat.py reset
+
+<span class="c"># 3. Rejouer le banc de rappel (5 à 6 min, travaille dans data_bench\)</span>
+python bench.py 2 16
+
+<span class="c"># Arrêter le serveur : en PowerShell (taskkill ne marche pas sous Git Bash)</span>
+Stop-Process -Name llama-server -Force</code></pre>
+  <p>Le dossier <code>data\</code> contient encore la conversation du banc v2 (102&nbsp;messages). <code>python optchat.py view</code> te la montre telle que le modèle la reçoit&nbsp;; <code>reset</code> l'efface pour repartir de zéro. Autres commandes&nbsp;: <code>say "message"</code> pour un seul tour, <code>stats</code> pour l'état de l'arbre. Variables utiles&nbsp;: <code>OPTCHAT_URL</code>, <code>OPTCHAT_DATA</code>, <code>OPTCHAT_COMPACT_URL</code>.</p>
+<pre><code>C:\Users\abdou\apothicaire\optchat\
+├─ optchat.py            <span class="c">le prototype : chat, say, view, stats, reset</span>
+├─ bench.py              <span class="c">le banc de rappel</span>
+├─ start_servers.sh      <span class="c">démarre llama-server (Bonsai 27B, port 18435, 2 slots)</span>
+├─ README.md             <span class="c">conception, leçons 1 à 10, tableau des bancs</span>
+├─ rapport.html          <span class="c">ce rapport</span>
+├─ bench_results_v1.md … bench_results_v4.md   <span class="c">tableaux complets des bancs</span>
+├─ data\                 <span class="c">mémoire du chat (contient la conversation du banc v2)</span>
+├─ data_bench\           <span class="c">données du banc v4</span>
+├─ models\               <span class="c">Ternary-Bonsai-8B-PQ2_0.gguf, plus utilisé</span>
+├─ notes\                <span class="c">session-summary, comparatif, pi-durable, pi-durable-spike,</span>
+│                        <span class="c">dsh-integration, dsh-spike</span>
+├─ pi-spike\             <span class="c">optchat-pi.mjs : le squelette Pi Durable</span>
+├─ dsh-spike\            <span class="c">profil dsh isolé, plugin zoom, journaux des essais</span>
+└─ run\                  <span class="c">journaux du serveur, sondes de cache, données brutes du banc v2</span></code></pre>
+  <p>Pour aller plus loin&nbsp;: <code>README.md</code>, puis <code>notes\comparatif.md</code>, <code>notes\pi-durable-spike.md</code> et <code>notes\dsh-spike.md</code>. Le modèle 27B reste dans le dossier de Hermes (<code>AppData\Local\hermes\models\</code>), et le moteur dans <code>~/mitsuba/llama</code>.</p>
+</section>
+
+<!-- ============================================================ 8 -->
+<section id="methode">
+  <h2><span class="sn">8</span>Méthode de travail</h2>
+  <div class="method">
+    <h3>Qui a fait quoi</h3>
+    <p>La session principale a écrit le prototype, lancé les bancs et mené l'enquête sur le cache. Six sous-agents ont pris le reste&nbsp;: un Opus pour la revue de code de <code>optchat.py</code> (15&nbsp;constats)&nbsp;; deux Sonnet pour les notes de recherche sur Pi Durable (lecture du code source) et sur dsh&nbsp;; deux Opus pour les essais pratiques de Pi Durable et de dsh contre Bonsai&nbsp;; un Opus pour ce rapport.</p>
+    <h3>Déroulé</h3>
+    <ol class="timeline">
+      <li><time>~21h30</time><span>Avis sur le gist, inventaire de la machine (Hermes, dsh, le fork PrismML).</span></li>
+      <li><time>22h11</time><span>Premier essai du prototype.</span></li>
+      <li><time>22h17 · 22h25</time><span>Bancs v1 puis v2.</span></li>
+      <li><time>22h29 – 22h37</time><span>Enquête sur le cache, avec les redémarrages fantômes de la section&nbsp;5.</span></li>
+      <li><time>22h39 – 22h54</time><span>Téléchargement du Bonsai 8B, comparaison 27B et 8B.</span></li>
+      <li><time>~22h40 – 23h01</time><span>Revue de code et corrections (horaire approximatif).</span></li>
+      <li><time>22h57</time><span>Note de recherche Pi Durable.</span></li>
+      <li><time>23h01 · 23h07</time><span>Fin des bancs v3 (8B) et v4.</span></li>
+      <li><time>23h00 – 23h27</time><span>Essais pratiques Pi Durable et dsh, en parallèle&nbsp;; note de recherche dsh à 23h16.</span></li>
+      <li><time>23h29</time><span>Comparatif.</span></li>
+      <li><time>23h31 – 23h33</time><span>Revérification propre du cache sur serveur neuf, mise à jour du README.</span></li>
+      <li><time>ensuite</time><span>Ce rapport, puis extinction du PC.</span></li>
+    </ol>
+    <p class="small">Horaires tirés de l'horodatage des fichiers&nbsp;; ceux marqués «&nbsp;~&nbsp;» sont approximatifs.</p>
+  </div>
+</section>
+
+</main>
+</div>
+
+<footer>Rapport écrit par Claude (Opus) le 7 octobre 2026, à partir de <code>README.md</code>, des notes de <code>notes\</code>, des tableaux <code>bench_results_v*.md</code> et des données brutes des bancs. Les chiffres viennent de ces fichiers&nbsp;; les estimations sont signalées comme telles.</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* Banc v2, un tour par ligne : [type (a = fait planté, f = remplissage, q = rappel), durée s, tokens du prompt, relus, repris, zooms, tours, question] */
+  var TURNS = [["a",6.54,697,516,181,1,3,"Pour info, mon chat s'appelle Pixel et il a 4 ans."],["f",1.67,922,42,880,0,1,"Explique en une phrase ce qu'est un arbre binaire."],["f",0.55,995,40,955,0,1,"Donne-moi un synonyme de 'rapide'."],["a",3.32,1063,65,998,0,2,"Le serveur de prod du projet Atlas est 10.0.3.47, et on y accède en SSH sur le port 2222."],["f",2.76,1396,1215,181,0,1,"Combien font 17 fois 23 ? Réponds juste le nombre."],["f",0.54,1440,41,1399,0,1,"Cite une capitale européenne au hasard, un mot."],["a",2.8,1488,46,1442,0,2,"J'ai finalement choisi PostgreSQL pour Atlas, pas MongoDB, à cause des transactions."],["f",1.76,1632,40,1592,0,1,"En une phrase : différence entre TCP et UDP ?"],["f",3.69,1673,1492,181,0,1,"Quel est le pluriel de 'cheval' ?"],["a",1.44,1740,53,1687,0,1,"Note que ma collègue Inès Marchetti reprend le module de facturation à partir du 15 novembre."],["f",0.59,1810,44,1766,0,1,"Propose un nom de variable pour un compteur de tentatives."],["f",1.38,1855,41,1814,0,1,"En une phrase, c'est quoi un cache KV ?"],["a",1.76,1935,56,1879,0,1,"Le token de build s'appelle ATLAS_BUILD_KEY et il est dans le fichier .env.ci, pas dans .env."],["f",3.75,1962,1781,181,0,1,"Donne un exemple de palindrome."],["f",1.12,2002,37,1965,0,1,"Un conseil court pour bien dormir ?"],["a",1.06,2064,45,2019,0,1,"Mon budget max pour le nouveau GPU est de 650 euros."],["f",0.53,2119,39,2080,0,1,"Traduis 'bonne chance' en anglais."],["f",1.55,2163,42,2121,0,1,"C'est quoi le complément à deux, en une phrase ?"],["a",4.81,2140,1959,181,0,1,"Le rendez-vous chez le dentiste est le jeudi 23 octobre à 9h15."],["f",0.57,2202,40,2162,0,1,"Donne-moi une couleur froide, un mot."],["f",1.23,2243,38,2205,0,1,"En une phrase, pourquoi utiliser git ?"],["a",1.67,2322,58,2264,0,1,"Pour le bot Discord, le préfixe de commande est !ax et la couleur d'embed est #3FA7D6."],["f",0.53,2395,43,2352,0,1,"Quelle est la racine carrée de 144 ?"],["f",4.36,2331,2150,181,0,1,"Cite un langage fonctionnel."],["f",1.53,2375,42,2333,0,1,"Une phrase sur le théorème de Pythagore."],["f",0.53,2441,38,2403,0,1,"Donne un prénom commençant par T."],["f",1.49,2484,40,2444,0,1,"En une phrase, c'est quoi une regex ?"],["f",0.52,2548,37,2511,0,1,"Un fruit qui commence par M ?"],["f",5.57,2437,2256,181,0,1,"Explique en une phrase ce qu'est un arbre binaire."],["f",0.52,2506,41,2465,0,1,"Donne-moi un synonyme de 'rapide'."],["f",0.57,2556,48,2508,0,1,"Combien font 17 fois 23 ? Réponds juste le nombre."],["f",0.52,2600,41,2559,0,1,"Cite une capitale européenne au hasard, un mot."],["f",1.59,2642,40,2602,0,1,"En une phrase : différence entre TCP et UDP ?"],["f",5.06,2682,2501,181,0,1,"Quel est le pluriel de 'cheval' ?"],["f",0.52,2729,44,2685,0,1,"Propose un nom de variable pour un compteur de tentatives."],["f",1.39,2772,41,2731,0,1,"En une phrase, c'est quoi un cache KV ?"],["f",0.56,2832,36,2796,0,1,"Donne un exemple de palindrome."],["f",1.09,2872,37,2835,0,1,"Un conseil court pour bien dormir ?"],["q",6.74,2589,2408,181,1,2,"Comment s'appelle mon chat ?"],["q",0.61,2901,43,2858,0,1,"Quel est le port SSH du serveur de prod d'Atlas ?"],["q",0.76,2950,45,2905,0,1,"Quelle base de données ai-je choisie pour Atlas, et pourquoi ?"],["q",1.01,2999,41,2958,0,1,"Qui reprend le module de facturation, et quand ?"],["q",5.5,2873,2692,181,0,1,"Dans quel fichier se trouve ATLAS_BUILD_KEY ?"],["q",0.63,2919,39,2880,0,1,"Quel est mon budget max pour le GPU ?"],["q",0.64,2966,42,2924,0,1,"À quelle heure est mon rendez-vous chez le dentiste ?"],["q",0.68,3013,42,2971,0,1,"Quelle est la couleur d'embed du bot Discord ?"]];
+
+  /* run/data_v2/view.json, déplié : [id, niveau (-1 = message en clair), premier msg, dernier msg, date ou rôle, texte] */
+  var VIEW = [["n130",3,0,7,"10-07 22:20","L'utilisateur indique que son chat s'appelle Pixel et a 4 ans, l'assistant confirme la prise en note et propose de l'aider pour sa santé, son alimentation ou son comportement, puis l'utilisateur demande une explication en une phrase de ce qu'est un arbre binaire, l'assistant expliquant qu'il s'agit d'une structure hiérarchique où chaque nœud a au maximum deux enfants (gauche et droite)."],["n131",3,8,15,"10-07 22:20","L'utilisateur demande un synonyme du mot 'rapide' (réponse 'vite') et indique que le serveur de prod du projet Atlas est 10.0.3.47, accessible en SSH sur le port 2222, l'assistant confirme la prise en note de ces informations, puis l'utilisateur demande le résultat de 17 fois 23 en précisant de répondre juste le nombre, l'assistant répondant 391."],["n132",3,16,23,"10-07 22:20","L'utilisateur demande une capitale européenne au hasard (réponse « Prague ») puis choisit PostgreSQL pour Atlas plutôt que MongoDB à cause des transactions, l'assistant confirme ce choix, puis l'utilisateur demande la différence entre TCP et UDP en une phrase, l'assistant expliquant que TCP est orienté connexion et garantit la livraison dans l'ordre, tandis que UDP est sans connexion et privilégie la rapidité."],["n92",2,24,27,"10-07 22:21","L'utilisateur demande le pluriel de cheval (chevaux) et note que sa collègue Inès Marchetti reprend le module de facturation à partir du 15 novembre."],["n93",2,28,31,"10-07 22:21","L'utilisateur demande un nom de variable pour un compteur de tentatives (retryCount) et une définition d'un cache KV (stockage en mémoire associant des clés à des valeurs pour un accès rapide)."],["n94",2,32,35,"10-07 22:21","L'utilisateur précise que le token de build s'appelle ATLAS_BUILD_KEY et se trouve dans le fichier .env.ci, pas dans .env, et demande un exemple de palindrome (kayak)."],["n110",2,36,39,"10-07 22:21","L'utilisateur demande un conseil court pour bien dormir (l'assistant conseille d'éviter les écrans au moins 30 minutes avant de se coucher) et indique que son budget maximum pour le nouveau GPU est de 650 euros, ce que l'assistant confirme."],["n111",2,40,43,"10-07 22:21","L'utilisateur demande la traduction de « bonne chance » en anglais (l'assistant répond « Good luck ») et la définition du complément à deux en une phrase (l'assistant explique que c'est la valeur obtenue en soustrant un nombre de deux, soit 2 − x)."],["n127",2,44,47,"10-07 22:22","L'utilisateur indique que son rendez-vous chez le dentiste est le jeudi 23 octobre à 9h15 et demande une couleur froide en un seul mot, ce à quoi l'assistant répond « Bleu »."],["n128",2,48,51,"10-07 22:22","L'utilisateur demande en une phrase pourquoi utiliser git (versionner le code, suivre les modifications et collaborer) et indique que le préfixe du bot Discord est !ax et la couleur d'embed #3FA7D6, ce que l'assistant confirme."],["n129",2,52,55,"10-07 22:22","L'utilisateur demande la racine carrée de 144 (l'assistant répond 12) et un langage fonctionnel (l'assistant répond Haskell)."],["n148",2,56,59,"10-07 22:22","L'utilisateur demande une phrase sur le théorème de Pythagore, l'assistant répond que dans un triangle rectangle le carré de l'hypoténuse est égal à la somme des carrés des deux autres côtés, puis demande un prénom commençant par T, pour lequel l'assistant propose Théodore."],["n149",2,60,63,"10-07 22:22","L'utilisateur demande une définition d'une regex en une phrase, l'assistant répond qu'une regex est un modèle de caractères pour rechercher, matcher ou manipuler des chaînes de texte, puis demande un fruit commençant par M, pour lequel l'assistant répond Melon."],["n123",1,64,65,"10-07 22:23","L'utilisateur demande une explication en une phrase d'un arbre binaire et l'assistant explique qu'un arbre binaire est une structure hiérarchique où chaque nœud a au maximum deux enfants (un gauche et un droit)."],["n124",1,66,67,"10-07 22:23","L'utilisateur demande un synonyme de 'rapide' et l'assistant répond 'Vite'."],["n125",1,68,69,"10-07 22:23","L'utilisateur demande le résultat de 17 fois 23, en précisant de répondre juste le nombre, et l'assistant répond 391."],["n126",1,70,71,"10-07 22:23","L'utilisateur demande de citer une capitale européenne au hasard en un seul mot et l'assistant répond « Prague »."],["n143",1,72,73,"10-07 22:23","L'utilisateur demande la différence entre TCP et UDP en une phrase, l'assistant explique que TCP est orienté connexion et garantit la livraison dans l'ordre, tandis que UDP est sans connexion et privilégie la rapidité."],["n144",1,74,75,"10-07 22:23","L'utilisateur demande le pluriel du mot « cheval », l'assistant répond « Chevaux »."],["n145",1,76,77,"10-07 22:23","L'utilisateur demande un nom de variable pour un compteur de tentatives, l'assistant propose le nom retryCount."],["n146",1,78,79,"10-07 22:23","L'utilisateur demande une définition d'un cache KV en une phrase, l'assistant explique qu'un cache KV est un stockage en mémoire associant des clés à des valeurs pour un accès rapide."],["n147",1,80,81,"10-07 22:23","L'utilisateur demande un exemple de palindrome et l'assistant répond « kayak »."],["n135",0,82,82,"10-07 22:23","L'utilisateur demande un conseil court pour bien dormir."],["n136",0,83,83,"10-07 22:23","L'assistant conseille d'éviter les écrans au moins 30 minutes avant de se coucher."],["n137",0,84,84,"10-07 22:24","L'utilisateur demande le nom de son chat."],["n138",0,85,85,"10-07 22:24","L'assistant appelle l'outil zoom avec l'identifiant « n130 »."],["n139",0,86,86,"10-07 22:24","L'utilisateur indique que son chat s'appelle Pixel et a 4 ans, l'assistant confirme et propose de l'aider pour sa santé, son alimentation ou son comportement, puis explique qu'un arbre binaire est une structure hiérarchique où chaque nœud a au maximum deux enfants (gauche et droite)."],["n140",0,87,87,"10-07 22:24","L'assistant confirme le nom du chat, Pixel."],["n141",0,88,88,"10-07 22:24","L'utilisateur demande le port SSH du serveur de prod d'Atlas."],["n142",0,89,89,"10-07 22:24","L'assistant indique que le port SSH du serveur de prod d'Atlas est 2222."],["#90",-1,90,90,"user","Quelle base de données ai-je choisie pour Atlas, et pourquoi ?"],["#91",-1,91,91,"assistant","PostgreSQL, à cause des transactions."],["#92",-1,92,92,"user","Qui reprend le module de facturation, et quand ?"],["#93",-1,93,93,"assistant","Inès Marchetti, à partir du 15 novembre."],["#94",-1,94,94,"user","Dans quel fichier se trouve ATLAS_BUILD_KEY ?"],["#95",-1,95,95,"assistant","Dans le fichier `.env.ci`."],["#96",-1,96,96,"user","Quel est mon budget max pour le GPU ?"],["#97",-1,97,97,"assistant","650 euros."],["#98",-1,98,98,"user","À quelle heure est mon rendez-vous chez le dentiste ?"],["#99",-1,99,99,"assistant","9h15."],["#100",-1,100,100,"user","Quelle est la couleur d'embed du bot Discord ?"],["#101",-1,101,101,"assistant","#3FA7D6"]];
+
+  var NS = "http://www.w3.org/2000/svg";
+  var nf0 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var nf2 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var TAG = { a: "fait planté", f: "remplissage", q: "question de rappel" };
+
+  function S(name, attrs, parent, text) {
+    var e = document.createElementNS(NS, name);
+    if (attrs) { for (var k in attrs) { if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]); } }
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function Tip(host) {
+    var tip = document.createElement("div");
+    tip.className = "tip";
+    tip.hidden = true;
+    host.appendChild(tip);
+    function place(x, y) {
+      var hw = host.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+      var left = Math.max(8, Math.min(x + 14, hw - tw - 8));
+      var top = y - th - 14;
+      if (top < 4) top = y + 18;
+      tip.style.left = left + "px";
+      tip.style.top = top + "px";
+    }
+    return {
+      show: function (lines, x, y) {
+        tip.textContent = "";
+        lines.forEach(function (ln, i) {
+          var d = document.createElement(i === 0 ? "strong" : "div");
+          if (ln.m) d.className = "m";
+          d.textContent = ln.t;
+          tip.appendChild(d);
+        });
+        tip.hidden = false;
+        place(x, y);
+      },
+      move: place,
+      hide: function () { tip.hidden = true; }
+    };
+  }
+
+  function bind(el, host, tip, linesFn, on, off) {
+    function rel(evt) {
+      var r = host.getBoundingClientRect();
+      return [evt.clientX - r.left, evt.clientY - r.top];
+    }
+    el.addEventListener("pointerenter", function (e) { if (on) on(); var p = rel(e); tip.show(linesFn(), p[0], p[1]); });
+    el.addEventListener("pointermove", function (e) { var p = rel(e); tip.move(p[0], p[1]); });
+    el.addEventListener("pointerleave", function () { tip.hide(); if (off) off(); });
+    el.addEventListener("focus", function () {
+      if (on) on();
+      var r = host.getBoundingClientRect(), b = el.getBoundingClientRect();
+      tip.show(linesFn(), b.left - r.left + b.width / 2, b.top - r.top);
+    });
+    el.addEventListener("blur", function () { tip.hide(); if (off) off(); });
+  }
+
+  /* ---------- per-turn chart (bench v2) ---------- */
+  function turnsChart() {
+    var host = document.getElementById("turns-fig"), mount = document.getElementById("turns-svg");
+    if (!host || !mount) return;
+    var W = 760, H = 380, ML = 56, MR = 14, n = TURNS.length, slot = (W - ML - MR) / n, bw = 9;
+    var A = { top: 36, h: 120, max: 3000, ticks: [0, 1000, 2000, 3000], k: 3 };
+    var B = { top: 214, h: 120, max: 7, ticks: [0, 2, 4, 6], k: 1 };
+    var svg = S("svg", { viewBox: "0 0 " + W + " " + H, "class": "w640", role: "img",
+      "aria-label": "Banc v2 : tokens relus et durée de chacun des 46 tours. Neuf pics correspondent aux tours où la vue a changé." });
+    function cx(i) { return ML + slot * i + slot / 2; }
+    function yOf(P, v) { return P.top + P.h - (v / P.max) * P.h; }
+    function promo(t, i) { return i > 0 && t[3] > 1000; }
+    var q0 = 0;
+    for (var i = 0; i < n; i++) { if (TURNS[i][0] === "q") { q0 = i; break; } }
+
+    [A, B].forEach(function (P) {
+      S("rect", { x: ML + slot * q0, y: P.top, width: slot * (n - q0), height: P.h, "class": "band" }, svg);
+      P.ticks.forEach(function (t) {
+        var y = yOf(P, t);
+        S("line", { x1: ML, x2: W - MR, y1: y, y2: y, "class": t === 0 ? "axis" : "grid" }, svg);
+        S("text", { x: ML - 8, y: y + 4, "class": "t-tick", "text-anchor": "end" }, svg, nf0.format(t));
+      });
+    });
+    S("text", { x: ML, y: A.top - 14, "class": "t-panel" }, svg, "Tokens relus par tour");
+    S("text", { x: ML, y: B.top - 14, "class": "t-panel" }, svg, "Durée du tour, en secondes");
+    S("text", { x: ML + slot * (q0 + (n - q0) / 2), y: A.top - 10, "class": "t-note", "text-anchor": "middle" }, svg, "questions de rappel");
+
+    var curA = S("rect", { x: 0, y: A.top, width: slot, height: A.h, "class": "cursor", visibility: "hidden" }, svg);
+    var curB = S("rect", { x: 0, y: B.top, width: slot, height: B.h, "class": "cursor", visibility: "hidden" }, svg);
+
+    function barPath(x, base, h, w) {
+      var r = Math.min(4, h, w / 2), y = base - h;
+      return "M" + x + "," + base + "V" + (y + r) + "Q" + x + "," + y + " " + (x + r) + "," + y +
+        "H" + (x + w - r) + "Q" + (x + w) + "," + y + " " + (x + w) + "," + (y + r) + "V" + base + "Z";
+    }
+    TURNS.forEach(function (t, i) {
+      var cls = promo(t, i) ? "bar-hi" : "bar-lo";
+      [A, B].forEach(function (P) {
+        var h = Math.max(1.5, (t[P.k] / P.max) * P.h);
+        S("path", { d: barPath(cx(i) - bw / 2, P.top + P.h, h, bw), "class": cls }, svg);
+      });
+    });
+
+    function argmax(k) { var m = 0; TURNS.forEach(function (t, j) { if (t[k] > TURNS[m][k]) m = j; }); return m; }
+    var ia = argmax(3), ib = argmax(1);
+    S("text", { x: cx(ia), y: yOf(A, TURNS[ia][3]) - 6, "class": "t-val", "text-anchor": "middle" }, svg, nf0.format(TURNS[ia][3]));
+    S("text", { x: cx(ib), y: yOf(B, TURNS[ib][1]) - 6, "class": "t-val", "text-anchor": "middle" }, svg, nf2.format(TURNS[ib][1]) + " s");
+    S("text", { x: cx(0) - 4, y: yOf(A, TURNS[0][3]) - 6, "class": "t-note" }, svg, "1er tour");
+
+    for (var x = 0; x < n; x += 5) {
+      S("text", { x: cx(x), y: B.top + B.h + 17, "class": "t-tick", "text-anchor": "middle" }, svg, String(x));
+    }
+    S("text", { x: W - MR, y: H - 8, "class": "t-note", "text-anchor": "end" }, svg, "n° du tour");
+
+    var tip = Tip(host);
+    TURNS.forEach(function (t, i) {
+      var hit = S("rect", { x: ML + slot * i, y: A.top - 6, width: slot, height: B.top + B.h - A.top + 6, "class": "hit", tabindex: "0",
+        "aria-label": "Tour " + i + " : " + nf2.format(t[1]) + " secondes, " + nf0.format(t[3]) + " tokens relus" }, svg);
+      bind(hit, host, tip, function () {
+        var kind = i === 0 ? "premier tour, cache presque vide" : (promo(t, i) ? "la vue a changé (promotion)" : "ajout en fin de prompt");
+        return [
+          { t: "Tour " + i + " · " + nf2.format(t[1]) + " s" },
+          { t: nf0.format(t[3]) + " tokens relus · " + nf0.format(t[4]) + " repris du cache" },
+          { t: TAG[t[0]] + " · " + kind },
+          { t: t[6] + (t[6] > 1 ? " appels au modèle" : " appel au modèle") + (t[5] ? " · " + t[5] + " zoom" : "") },
+          { t: "« " + t[7] + " »", m: true }
+        ];
+      }, function () {
+        curA.setAttribute("x", ML + slot * i); curB.setAttribute("x", ML + slot * i);
+        curA.setAttribute("visibility", "visible"); curB.setAttribute("visibility", "visible");
+      }, function () {
+        curA.setAttribute("visibility", "hidden"); curB.setAttribute("visibility", "hidden");
+      });
+    });
+    mount.appendChild(svg);
+
+    var tb = document.getElementById("turns-tbody");
+    if (tb) {
+      TURNS.forEach(function (t, i) {
+        var tr = document.createElement("tr");
+        [String(i), TAG[t[0]], nf2.format(t[1]), nf0.format(t[2]), nf0.format(t[3]), nf0.format(t[4]), String(t[5]), t[7]].forEach(function (v, k) {
+          var td = document.createElement("td");
+          td.textContent = v;
+          if (k !== 1 && k !== 7) td.className = "num";
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+    }
+  }
+
+  /* ---------- the real view (bench v2) ---------- */
+  function viewStrip() {
+    var host = document.getElementById("view-fig"), mount = document.getElementById("view-svg");
+    if (!host || !mount) return;
+    var W = 760, H = 156, X0 = 20, X1 = 740, N = 102, u = (X1 - X0) / N, Y = 62, BH = 40;
+    var svg = S("svg", { viewBox: "0 0 " + W + " " + H, "class": "w640", role: "img",
+      "aria-label": "La vue : 3 lignes L3, 10 lignes L2, 9 lignes L1, 8 lignes L0 puis 12 messages en clair, du plus ancien au plus récent." });
+    var groups = [
+      { lv: 3, a: "3 lignes L3", b: "8 messages chacune" },
+      { lv: 2, a: "10 lignes L2", b: "4 messages chacune" },
+      { lv: 1, a: "9 lignes L1", b: "2 messages chacune" },
+      { lv: 0, a: "8 lignes L0", b: "1 message" },
+      { lv: -1, a: "12 messages", b: "en clair" }
+    ];
+    groups.forEach(function (g) {
+      var lo = Infinity, hi = -Infinity;
+      VIEW.forEach(function (v) { if (v[1] === g.lv) { lo = Math.min(lo, v[2]); hi = Math.max(hi, v[3]); } });
+      g.lo = lo; g.hi = hi;
+      var xa = X0 + lo * u, xb = X0 + (hi + 1) * u, xm = (xa + xb) / 2;
+      var last = g.lv === -1, tx = last ? xb : xm, anchor = last ? "end" : "middle";
+      S("text", { x: tx, y: 18, "class": "t-val", "text-anchor": anchor }, svg, g.a);
+      S("text", { x: tx, y: 33, "class": "t-note", "text-anchor": anchor }, svg, g.b);
+      S("path", { d: "M" + (xa + 1) + ",50V43H" + (xb - 1) + "V50", "class": "link" }, svg);
+    });
+    var enc = window.TextEncoder ? new TextEncoder() : null;
+    var tip = Tip(host);
+    VIEW.forEach(function (v) {
+      var x = X0 + v[2] * u, w = (v[3] - v[2] + 1) * u;
+      S("rect", { x: x + 1, y: Y, width: Math.max(1, w - 2), height: BH, rx: Math.min(3, (w - 2) / 2), "class": v[1] < 0 ? "lv-raw" : "lv" + v[1] }, svg);
+      var hit = S("rect", { x: x, y: Y - 8, width: w, height: BH + 16, "class": "hit", tabindex: "0",
+        "aria-label": v[1] < 0 ? "Message " + v[0] + " en clair" : "Ligne " + v[0] + ", niveau L" + v[1] }, svg);
+      bind(hit, host, tip, function () {
+        if (v[1] < 0) {
+          return [
+            { t: "Message " + v[0] + " · en clair" },
+            { t: v[4] === "user" ? "écrit par l'utilisateur" : "réponse de l'assistant", m: true },
+            { t: v[5] }
+          ];
+        }
+        var bytes = enc ? enc.encode(v[5]).length : v[5].length;
+        var cover = v[2] === v[3] ? "message #" + v[2] : "messages #" + v[2] + "–#" + v[3];
+        return [
+          { t: v[0] + " · L" + v[1] + " · " + cover },
+          { t: v[5] },
+          { t: bytes + " octets · " + v[4], m: true }
+        ];
+      });
+    });
+    var marks = [0];
+    groups.forEach(function (g) { if (g.lo > 0) marks.push(g.lo); });
+    marks.forEach(function (m) {
+      S("text", { x: X0 + m * u, y: Y + BH + 17, "class": "t-tick", "text-anchor": m === 0 ? "start" : "middle" }, svg, "#" + m);
+    });
+    S("text", { x: X1, y: Y + BH + 17, "class": "t-tick", "text-anchor": "end" }, svg, "#101");
+    S("text", { x: X0, y: H - 8, "class": "t-note" }, svg, "← plus ancien");
+    S("text", { x: X1, y: H - 8, "class": "t-note", "text-anchor": "end" }, svg, "plus récent →");
+    mount.appendChild(svg);
+  }
+
+  /* ---------- recall grid tooltips ---------- */
+  function recallTips() {
+    var host = document.getElementById("recall-fig");
+    if (!host) return;
+    var tip = Tip(host);
+    Array.prototype.forEach.call(host.querySelectorAll(".rmark"), function (m) {
+      bind(m, host, tip, function () {
+        return [
+          { t: m.getAttribute("data-a") },
+          { t: m.getAttribute("data-s") },
+          { t: m.getAttribute("data-q"), m: true }
+        ];
+      });
+    });
+  }
+
+  /* ---------- contents rail: highlight the section in view ---------- */
+  function tocSpy() {
+    if (!("IntersectionObserver" in window)) return;
+    var links = {};
+    Array.prototype.forEach.call(document.querySelectorAll(".toc a"), function (a) { links[a.getAttribute("href").slice(1)] = a; });
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        for (var k in links) { if (Object.prototype.hasOwnProperty.call(links, k)) links[k].removeAttribute("aria-current"); }
+        var a = links[e.target.id];
+        if (a) a.setAttribute("aria-current", "true");
+      });
+    }, { rootMargin: "-15% 0px -75% 0px" });
+    Array.prototype.forEach.call(document.querySelectorAll("main > section[id]"), function (s) { obs.observe(s); });
+  }
+
+  [turnsChart, viewStrip, recallTips, tocSpy].forEach(function (f) {
+    try { f(); } catch (err) { if (window.console) console.error(err); }
+  });
+})();
+</script>
+</body>
+</html>

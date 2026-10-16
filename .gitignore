@@ -1,0 +1,12 @@
+# chat memories and benchmark state (local, may hold private conversations)
+data/
+data_bench/
+run/
+# model weights
+models/
+*.gguf
+# one-night spikes of other harnesses (kept locally, not part of the prototype)
+pi-spike/
+dsh-spike/
+__pycache__/
+*.log
