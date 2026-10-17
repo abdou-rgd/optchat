@@ -96,3 +96,7 @@ Même banc, même serveur upstream que v6, fichier `Ternary-Bonsai-2-27B-Q2_0-pr
 | 27B Q2_0, upstream | ≈ 8,4 Go | ≈ 31 tok/s | 8/8, 7/8, 8/8 | 8/8, ≈ 24 tok/s, 7,3 Go |
 
 Le 7/8 du run 2 est une boucle d'appels d'outils sur une question, pas une perte à la compaction. Conclusion : le fork PrismML n'est plus nécessaire pour le 27B ; il reste le choix par défaut pour l'instant (1 Go de VRAM de moins), décision après le banc complet d'Apothicaire.
+
+## Banc v8 : 27B Q2_0 upstream, banc complet d'Apothicaire (17 octobre 2026)
+
+Le banc de 25 exercices d'Apothicaire (porte v1) sur le serveur upstream b11700 : 193/200 tours corrects, 0/897 nombres non vérifiés, 141/141 appels d'outils valides, 8,0 s par tour (fork PTQ1_0 : 195/200, 0/926, 10,4 s). Décision : la démo du 17 novembre tourne sur llama.cpp standard, script `start_servers_upstream.sh` ; le fork reste la référence des mesures de porte jusqu'au jeu gelé.
