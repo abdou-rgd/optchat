@@ -86,3 +86,13 @@ Même banc de rappel, trois exécutions par modèle, serveur upstream (`llama-se
 | 4B | `Ternary-Bonsai-2-4B-Q2_0.gguf` (1,21 Go) | ≈ 1,9 Go | 104–108 tok/s | 8/8, 5/8, 7/8 | < 1 min | |
 
 Les échecs sont des « je ne trouve pas » sur des faits plantés (nom + date, port SSH), donc des pertes à la compaction, comme pour l'ancien 8B mais bien moins fréquentes. Le 27B reste la référence pour la mémoire ; le 9B est un compromis plausible, le 4B un compacteur candidat à tester seul sur le slot 1.
+
+## Banc v7 : Bonsai 2 27B (Q2_0) sur llama.cpp upstream b11700 (17 octobre 2026)
+
+Même banc, même serveur upstream que v6, fichier `Ternary-Bonsai-2-27B-Q2_0-prism-fork-required.gguf` (7,63 Go ; malgré son nom et le README du dépôt HF, il tourne sur le llama.cpp standard depuis b11555). Fichiers `bench_results_v7_*.md`.
+
+| modèle | VRAM serveur | génération | rappel (3 runs) | 27B PTQ1_0 (v4, fork) |
+|---|---|---|---|---|
+| 27B Q2_0, upstream | ≈ 8,4 Go | ≈ 31 tok/s | 8/8, 7/8, 8/8 | 8/8, ≈ 24 tok/s, 7,3 Go |
+
+Le 7/8 du run 2 est une boucle d'appels d'outils sur une question, pas une perte à la compaction. Conclusion : le fork PrismML n'est plus nécessaire pour le 27B ; il reste le choix par défaut pour l'instant (1 Go de VRAM de moins), décision après le banc complet d'Apothicaire.
