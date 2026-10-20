@@ -41,7 +41,8 @@ CFG = dict(
     digest_max_bytes=12000,      # digest alone: merge the coarsest lines until it fits
     digest_min_bytes=4000,       # the digest is never squeezed below this to make room for a large raw zone
     line_bytes=512,              # hard cap of a summary line (gist: ~512 bytes)
-    verbatim_max_chars=160,      # user/assistant messages up to this length are kept verbatim as L0 (no model call)
+    verbatim_max_bytes=512,      # a user/assistant message whose verbatim line fits in this is kept as L0 (no model call);
+                                 # two adjacent lines whose join fits in line_bytes are merged the same way
     raw_show_chars=6000,         # user/assistant raw messages longer than this are truncated in the view
     tool_show_chars=12000,       # tool results are shown up to this length (same cap as read_message)
     summarize_max_chars=6000,    # a message body is cut to this length before summarization
@@ -341,7 +342,7 @@ class Compactor:
                   "(start the server with -np 2 or set OPTCHAT_COMPACT_URL)", file=sys.stderr)
             self.llm, self.slot = llm, 0
         self.stats = {"summaries": 0, "merges": 0, "verbatim": 0, "calls": 0, "errors": 0, "seconds": 0.0,
-                      "guard_merges": 0}
+                      "guard_merges": 0, "joined": 0}
         self.last_error = None
 
     # -- model calls -------------------------------------------------------------
@@ -382,9 +383,15 @@ class Compactor:
         """Short user/assistant messages become a verbatim line without a model call (exact and free)."""
         if m["role"] not in ("user", "assistant"): return None
         c = re.sub(r"\s+", " ", m["content"]).strip()
-        if len(c) > self.cfg["verbatim_max_chars"]: return None
         who = "L'utilisateur dit" if m["role"] == "user" else "L'assistant répond"
-        return f"{who} : « {c} »"
+        line = f"{who} : « {c} »"
+        return line if len(line.encode("utf-8")) <= min(self.cfg["verbatim_max_bytes"], self.cfg["line_bytes"]) else None
+
+    def _joined_line(self, a, b):
+        """Two adjacent lines whose join fits in a line are merged without a model call: nothing is lost."""
+        ta, tb = self.store.nodes[a]["text"], self.store.nodes[b]["text"]
+        line = ta + (" " if ta.endswith((".", "!", "?", "»", "…")) else " ; ") + tb
+        return line if len(line.encode("utf-8")) <= self.cfg["line_bytes"] else None
 
     def _batches(self, keyed_texts):
         """Split [(key, text)] into batches under batch_max_chars (at least one item per batch)."""
@@ -422,9 +429,25 @@ class Compactor:
         return nodes
 
     def merge_pairs(self, pairs):
-        """One L(k+1) node per pair of adjacent L(k) nodes, in order; stops at the first failure."""
+        """One L(k+1) node per pair of adjacent L(k) nodes, in order; stops at the first failure. Pairs short enough
+        are joined without a model call; the others are summarized in batches."""
+        joined = {p: self._joined_line(*p) for p in pairs}
+        keyed = [((a, b), f"(a) {self.store.nodes[a]['text']}\n(b) {self.store.nodes[b]['text']}")
+                 for a, b in pairs if joined[(a, b)] is None]
+        merged = self._merge_lines(keyed)
         nodes = []
-        keyed = [((a, b), f"(a) {self.store.nodes[a]['text']}\n(b) {self.store.nodes[b]['text']}") for a, b in pairs]
+        for a, b in pairs:
+            text = joined[(a, b)] if joined[(a, b)] is not None else merged.get((a, b))
+            if text is None: break                                   # first failure: keep the merged prefix contiguous
+            na, nb = self.store.nodes[a], self.store.nodes[b]
+            nodes.append(self.store.add_node(max(na["level"], nb["level"]) + 1, na["first"], nb["last"], text, children=[a, b]))
+            self.stats["merges"] += 1
+            if joined[(a, b)] is not None: self.stats["joined"] += 1
+        return nodes
+
+    def _merge_lines(self, keyed):
+        """{pair: merged line} from the model, batch by batch; stops at the first failure."""
+        out = {}
         for batch in self._batches(keyed):
             parts = [f"=== Pair {k+1}\n{t}" for k, (_, t) in enumerate(batch)]
             lines = self._ask(f"Merge each pair of consecutive summary lines below ((a) happened before (b)) into ONE line "
@@ -436,12 +459,9 @@ class Compactor:
                     one = self._ask(f"Merge this pair of consecutive summary lines into ONE line. Answer as JSON {{\"lines\": [\"...\"]}}.\n\n{p}", 1)
                     if one is None: break
                     lines.append(one[0])
-            for ((a, b), _), text in zip(batch, lines):
-                na, nb = self.store.nodes[a], self.store.nodes[b]
-                nodes.append(self.store.add_node(max(na["level"], nb["level"]) + 1, na["first"], nb["last"], text, children=[a, b]))
-                self.stats["merges"] += 1
-            if len(lines) < len(batch): return nodes
-        return nodes
+            for (pair, _), text in zip(batch, lines): out[pair] = text
+            if len(lines) < len(batch): return out
+        return out
 
     # -- view maintenance ------------------------------------------------------------
     def fit_digest(self, budget):

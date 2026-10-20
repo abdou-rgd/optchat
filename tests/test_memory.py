@@ -149,5 +149,60 @@ class TestByteGuard(unittest.TestCase):
         check_view(self, st)
 
 
+class TestModelFreeLines(unittest.TestCase):
+    """Short messages and short pairs never reach the model: the line is the exact text."""
+    def setUp(self):
+        self.s = Session(FakeLLM(line_chars=380))
+        self.st, self.comp = self.s.ag.store, self.s.ag.compactor
+
+    def tearDown(self): self.s.close()
+
+    def node(self, text):
+        m = self.st.add_msg("user", "x")
+        return self.st.add_node(0, m["i"], m["i"], text, msg=m["i"])["id"]
+
+    def test_a_message_up_to_the_line_cap_is_kept_verbatim(self):
+        text = "Mon budget pour le GPU est de 650 euros, " * 10            # 410 characters: summarized before (cap 160)
+        m = self.st.add_msg("user", text.strip())
+        calls = self.s.fake.compact_calls
+        nodes = self.comp.summarize_msgs([m["i"]])
+        self.assertEqual(self.s.fake.compact_calls, calls)
+        self.assertIn(text.strip(), nodes[m["i"]]["text"])
+        self.assertLessEqual(len(nodes[m["i"]]["text"].encode("utf-8")), 512)
+
+    def test_a_message_over_the_line_cap_is_summarized(self):
+        m = self.st.add_msg("assistant", "é" * 250)                    # 250 characters but 500 bytes + the prefix
+        calls = self.s.fake.compact_calls
+        self.comp.summarize_msgs([m["i"]])
+        self.assertEqual(self.s.fake.compact_calls, calls + 1)
+
+    def test_two_short_lines_are_joined_without_the_model(self):
+        a, b = self.node("L'utilisateur dit : « mon chat s'appelle Pixel »"), self.node("L'assistant répond : « noté »")
+        calls = self.s.fake.compact_calls
+        new = self.comp.merge_pairs([(a, b)])
+        self.assertEqual(self.s.fake.compact_calls, calls)
+        self.assertEqual(new[0]["text"], "L'utilisateur dit : « mon chat s'appelle Pixel » L'assistant répond : « noté »")
+        self.assertEqual((new[0]["level"], new[0]["children"]), (1, [a, b]))
+        self.assertEqual(self.comp.stats["joined"], 1)
+        c, d = self.node("l'utilisateur choisit PostgreSQL"), self.node("l'assistant confirme")
+        self.assertEqual(self.comp.merge_pairs([(c, d)])[0]["text"], "l'utilisateur choisit PostgreSQL ; l'assistant confirme")
+
+    def test_long_pairs_still_go_to_the_model(self):
+        a, b = self.node(PROSE.strip()), self.node(PROSE.strip())      # 2 x 227 bytes + separator: fits, joined
+        e, f = self.node(PROSE * 2), self.node(PROSE)                  # ~685 bytes together: summarized
+        calls = self.s.fake.compact_calls
+        new = self.comp.merge_pairs([(a, b), (e, f)])
+        self.assertEqual(len(new), 2); self.assertEqual(self.s.fake.compact_calls, calls + 1)
+        self.assertEqual(self.comp.stats["joined"], 1)
+
+    def test_a_failed_merge_keeps_the_prefix_contiguous(self):
+        a, b = self.node(PROSE * 2), self.node(PROSE)                  # needs the model, which fails
+        c, d = self.node("court"), self.node("court aussi")            # could be joined, but comes after the failure
+        self.s.fake.compactor_fails = True
+        n_nodes = len(self.st.nodes)
+        self.assertEqual(self.comp.merge_pairs([(a, b), (c, d)]), [])
+        self.assertEqual(len(self.st.nodes), n_nodes)                  # no orphan node in the tree
+
+
 if __name__ == "__main__":
     unittest.main()
