@@ -204,5 +204,38 @@ class TestModelFreeLines(unittest.TestCase):
         self.assertEqual(len(self.st.nodes), n_nodes)                  # no orphan node in the tree
 
 
+class TestCuts(unittest.TestCase):
+    def test_clip_line_cuts_at_a_word_boundary(self):
+        s = "L'utilisateur fixe la dose à 400 mg et la demi-vie à 6,1 h ; " * 20
+        out = optchat.clip_line(s, 512)
+        self.assertLessEqual(len(out.encode("utf-8")), 512)
+        self.assertTrue(out.endswith(" …"))
+        self.assertTrue(s.startswith(out[:-2]))
+        self.assertIn(s[len(out) - 2], " ")                          # the next character was a space: no word cut in two
+        self.assertEqual(optchat.clip_line("court", 512), "court")
+
+    def test_clip_line_never_splits_a_character(self):
+        out = optchat.clip_line("é" * 400, 512)                       # no space at all, 2 bytes per character
+        self.assertLessEqual(len(out.encode("utf-8")), 512)
+        self.assertEqual(out, "é" * 254 + " …")
+
+    def test_compactor_lines_are_clipped_cleanly(self):
+        s = Session(FakeLLM(line_chars=2000))                         # the model ignores the length rule
+        try:
+            m = s.ag.store.add_msg("tool_result", TOOL_RESULT, call_id="c1", name="nca_run")
+            line = s.ag.compactor.summarize_msgs([m["i"]])[m["i"]]["text"]
+            self.assertLessEqual(len(line.encode("utf-8")), 512); self.assertTrue(line.endswith(" …"))
+        finally: s.close()
+
+    def test_long_messages_reach_the_compactor_as_head_and_tail(self):
+        body = "DEBUT " + "x" * 20000 + " FIN: erreur lambda_z"
+        out = optchat.Compactor._msg_body({"role": "tool_result", "content": body}, 6000)
+        self.assertTrue(out.startswith("(tool result) DEBUT"))
+        self.assertTrue(out.endswith("FIN: erreur lambda_z"))         # the end of a tool output is no longer lost
+        self.assertIn("characters left out", out)
+        self.assertLess(len(out), 6100)
+        self.assertEqual(optchat.head_tail("court", 6000), "court")
+
+
 if __name__ == "__main__":
     unittest.main()

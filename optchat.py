@@ -45,7 +45,7 @@ CFG = dict(
                                  # two adjacent lines whose join fits in line_bytes are merged the same way
     raw_show_chars=6000,         # user/assistant raw messages longer than this are truncated in the view
     tool_show_chars=12000,       # tool results are shown up to this length (same cap as read_message)
-    summarize_max_chars=6000,    # a message body is cut to this length before summarization
+    summarize_max_chars=6000,    # a longer message body is shown to the compactor as its head and its tail (2/3 + 1/3)
     batch_max_chars=12000,       # max total chars of message bodies per compaction call (fits an 8k ctx)
     agent_max_tokens=1200,
     compact_max_tokens=220,      # per line
@@ -325,6 +325,21 @@ def build_messages(store, cfg):
     return msgs
 
 # ---------------------------------------------------------------- compaction
+def clip_line(s, cap):
+    """s in at most `cap` UTF-8 bytes: cut at the last word boundary, marked with an ellipsis (never inside a character)."""
+    if len(s.encode("utf-8")) <= cap: return s
+    mark = " …"
+    head = s.encode("utf-8")[:cap - len(mark.encode("utf-8"))].decode("utf-8", "ignore")
+    cut = head.rfind(" ")
+    if cut >= len(head) // 2: head = head[:cut]                      # a word boundary in the second half, else keep the cut
+    return head.rstrip(" ,;:") + mark
+
+def head_tail(body, limit):
+    """body in at most ~limit characters: its head and its tail, with what was left out said in between."""
+    if len(body) <= limit: return body
+    head, tail = limit * 2 // 3, limit - limit * 2 // 3
+    return f"{body[:head]} [... {len(body) - head - tail} characters left out ...] {body[-tail:]}"
+
 def _json_lines_schema(n):
     return {"type": "json_schema", "json_schema": {"name": "lines", "schema": {
         "type": "object", "properties": {"lines": {"type": "array", "items": {"type": "string"}, "minItems": n, "maxItems": n}},
@@ -367,7 +382,7 @@ class Compactor:
         for s in lines:
             s = re.sub(r"\s+", " ", str(s)).strip()
             s = re.sub(r"^\d+\s*[:.)\-]\s*", "", s)            # defensive: strip a leading "1: "
-            out.append(s.encode("utf-8")[:cap].decode("utf-8", "ignore"))
+            out.append(clip_line(s, cap))
         return out
 
     @staticmethod
@@ -377,7 +392,7 @@ class Compactor:
             if m.get("content"): body = m["content"] + " " + body
         elif m["role"] == "tool_result": body = f"(tool result) {m['content']}"
         else: body = m["content"]
-        return body[:limit] + (" [...]" if len(body) > limit else "")
+        return head_tail(body, limit)
 
     def _verbatim_line(self, m):
         """Short user/assistant messages become a verbatim line without a model call (exact and free)."""
