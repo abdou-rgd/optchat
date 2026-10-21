@@ -17,7 +17,7 @@ Design (after VictorTaelin's OptChat gist, adapted for local llama.cpp):
   e.g. a small model) so it never evicts the chat's KV cache. Short messages become verbatim lines
   without any model call. Batched calls use a JSON schema (grammar-constrained) for exact line counts.
 """
-import argparse, json, os, sys, time, threading, datetime, re, ctypes
+import argparse, json, math, os, sys, time, threading, datetime, re, ctypes
 import httpx
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -33,11 +33,19 @@ CFG = dict(
     raw_max=12, raw_min=4,       # raw (verbatim) zone: promote oldest to L0 when > raw_max items...
     raw_max_chars=24000,         # ...or when the raw zone exceeds this many chars (~6k tokens)
     zone_max=12, zone_min=8,     # per summary level: merge oldest pairs when > zone_max
+    # Byte guard. The per-level counts grow the digest with log2(messages) and nothing bounded it in bytes: at ~230
+    # messages of NCA turns (380-char lines, Apothicaire's 2.2k-token static prefix) the prompt passed the 12,288-token
+    # slot. French text is ~2.9 bytes/token (Qwen3 tokenizer, ~2.2 when dense in numbers), so 18 KB of view is ~6k tokens:
+    # with the guard the same 600-message session peaks at ~10.4k prompt tokens, which leaves the answer its 1,200.
+    view_max_bytes=18000,        # digest + raw zone, as shown to the model: promote raw messages, then shrink the digest
+    digest_max_bytes=12000,      # digest alone: merge the coarsest lines until it fits
+    digest_min_bytes=4000,       # the digest is never squeezed below this to make room for a large raw zone
     line_bytes=512,              # hard cap of a summary line (gist: ~512 bytes)
-    verbatim_max_chars=160,      # user/assistant messages up to this length are kept verbatim as L0 (no model call)
+    verbatim_max_bytes=512,      # a user/assistant message whose verbatim line fits in this is kept as L0 (no model call);
+                                 # two adjacent lines whose join fits in line_bytes are merged the same way
     raw_show_chars=6000,         # user/assistant raw messages longer than this are truncated in the view
     tool_show_chars=12000,       # tool results are shown up to this length (same cap as read_message)
-    summarize_max_chars=6000,    # a message body is cut to this length before summarization
+    summarize_max_chars=6000,    # a longer message body is shown to the compactor as its head and its tail (2/3 + 1/3)
     batch_max_chars=12000,       # max total chars of message bodies per compaction call (fits an 8k ctx)
     agent_max_tokens=1200,
     compact_max_tokens=220,      # per line
@@ -279,6 +287,17 @@ def render_digest(store):
     return ("<memory>\nOlder history, compressed, oldest first. Each line: [id level #first-#last date] summary. "
             "Use zoom(id) to open a line.\n" + "\n".join(lines) + "\n</memory>")
 
+def raw_view_bytes(store, cfg):
+    """UTF-8 bytes of the raw zone as build_messages shows it (same caps), without the chat template."""
+    total = 0
+    for it in store.view["items"]:
+        if it["kind"] != "raw": continue
+        m = store.log[it["i"]]; c = m["content"] or ""
+        if m["role"] == "tool_call": c += json.dumps(_calls_of(m), ensure_ascii=False)
+        cap = cfg["tool_show_chars"] if m["role"] == "tool_result" else cfg["raw_show_chars"]
+        total += len(c[:cap].encode("utf-8")) + 24          # + the "[#i MM-DD HH:MM] " header and the role markers
+    return total
+
 def build_messages(store, cfg):
     # The digest goes in its own user turn, not in the system prompt: the system prompt + tool
     # definitions (rendered by the chat template) then form a static prefix that is always cached.
@@ -306,6 +325,21 @@ def build_messages(store, cfg):
     return msgs
 
 # ---------------------------------------------------------------- compaction
+def clip_line(s, cap):
+    """s in at most `cap` UTF-8 bytes: cut at the last word boundary, marked with an ellipsis (never inside a character)."""
+    if len(s.encode("utf-8")) <= cap: return s
+    mark = " …"
+    head = s.encode("utf-8")[:cap - len(mark.encode("utf-8"))].decode("utf-8", "ignore")
+    cut = head.rfind(" ")
+    if cut >= len(head) // 2: head = head[:cut]                      # a word boundary in the second half, else keep the cut
+    return head.rstrip(" ,;:") + mark
+
+def head_tail(body, limit):
+    """body in at most ~limit characters: its head and its tail, with what was left out said in between."""
+    if len(body) <= limit: return body
+    head, tail = limit * 2 // 3, limit - limit * 2 // 3
+    return f"{body[:head]} [... {len(body) - head - tail} characters left out ...] {body[-tail:]}"
+
 def _json_lines_schema(n):
     return {"type": "json_schema", "json_schema": {"name": "lines", "schema": {
         "type": "object", "properties": {"lines": {"type": "array", "items": {"type": "string"}, "minItems": n, "maxItems": n}},
@@ -322,7 +356,8 @@ class Compactor:
             print("warning: chat server has a single slot; compaction will evict the chat's KV cache "
                   "(start the server with -np 2 or set OPTCHAT_COMPACT_URL)", file=sys.stderr)
             self.llm, self.slot = llm, 0
-        self.stats = {"summaries": 0, "merges": 0, "verbatim": 0, "calls": 0, "errors": 0, "seconds": 0.0}
+        self.stats = {"summaries": 0, "merges": 0, "verbatim": 0, "calls": 0, "errors": 0, "seconds": 0.0,
+                      "guard_merges": 0, "joined": 0}
         self.last_error = None
 
     # -- model calls -------------------------------------------------------------
@@ -347,7 +382,7 @@ class Compactor:
         for s in lines:
             s = re.sub(r"\s+", " ", str(s)).strip()
             s = re.sub(r"^\d+\s*[:.)\-]\s*", "", s)            # defensive: strip a leading "1: "
-            out.append(s.encode("utf-8")[:cap].decode("utf-8", "ignore"))
+            out.append(clip_line(s, cap))
         return out
 
     @staticmethod
@@ -357,15 +392,21 @@ class Compactor:
             if m.get("content"): body = m["content"] + " " + body
         elif m["role"] == "tool_result": body = f"(tool result) {m['content']}"
         else: body = m["content"]
-        return body[:limit] + (" [...]" if len(body) > limit else "")
+        return head_tail(body, limit)
 
     def _verbatim_line(self, m):
         """Short user/assistant messages become a verbatim line without a model call (exact and free)."""
         if m["role"] not in ("user", "assistant"): return None
         c = re.sub(r"\s+", " ", m["content"]).strip()
-        if len(c) > self.cfg["verbatim_max_chars"]: return None
         who = "L'utilisateur dit" if m["role"] == "user" else "L'assistant répond"
-        return f"{who} : « {c} »"
+        line = f"{who} : « {c} »"
+        return line if len(line.encode("utf-8")) <= min(self.cfg["verbatim_max_bytes"], self.cfg["line_bytes"]) else None
+
+    def _joined_line(self, a, b):
+        """Two adjacent lines whose join fits in a line are merged without a model call: nothing is lost."""
+        ta, tb = self.store.nodes[a]["text"], self.store.nodes[b]["text"]
+        line = ta + (" " if ta.endswith((".", "!", "?", "»", "…")) else " ; ") + tb
+        return line if len(line.encode("utf-8")) <= self.cfg["line_bytes"] else None
 
     def _batches(self, keyed_texts):
         """Split [(key, text)] into batches under batch_max_chars (at least one item per batch)."""
@@ -403,9 +444,25 @@ class Compactor:
         return nodes
 
     def merge_pairs(self, pairs):
-        """One L(k+1) node per pair of adjacent L(k) nodes, in order; stops at the first failure."""
+        """One L(k+1) node per pair of adjacent L(k) nodes, in order; stops at the first failure. Pairs short enough
+        are joined without a model call; the others are summarized in batches."""
+        joined = {p: self._joined_line(*p) for p in pairs}
+        keyed = [((a, b), f"(a) {self.store.nodes[a]['text']}\n(b) {self.store.nodes[b]['text']}")
+                 for a, b in pairs if joined[(a, b)] is None]
+        merged = self._merge_lines(keyed)
         nodes = []
-        keyed = [((a, b), f"(a) {self.store.nodes[a]['text']}\n(b) {self.store.nodes[b]['text']}") for a, b in pairs]
+        for a, b in pairs:
+            text = joined[(a, b)] if joined[(a, b)] is not None else merged.get((a, b))
+            if text is None: break                                   # first failure: keep the merged prefix contiguous
+            na, nb = self.store.nodes[a], self.store.nodes[b]
+            nodes.append(self.store.add_node(max(na["level"], nb["level"]) + 1, na["first"], nb["last"], text, children=[a, b]))
+            self.stats["merges"] += 1
+            if joined[(a, b)] is not None: self.stats["joined"] += 1
+        return nodes
+
+    def _merge_lines(self, keyed):
+        """{pair: merged line} from the model, batch by batch; stops at the first failure."""
+        out = {}
         for batch in self._batches(keyed):
             parts = [f"=== Pair {k+1}\n{t}" for k, (_, t) in enumerate(batch)]
             lines = self._ask(f"Merge each pair of consecutive summary lines below ((a) happened before (b)) into ONE line "
@@ -417,14 +474,46 @@ class Compactor:
                     one = self._ask(f"Merge this pair of consecutive summary lines into ONE line. Answer as JSON {{\"lines\": [\"...\"]}}.\n\n{p}", 1)
                     if one is None: break
                     lines.append(one[0])
-            for ((a, b), _), text in zip(batch, lines):
-                na, nb = self.store.nodes[a], self.store.nodes[b]
-                nodes.append(self.store.add_node(max(na["level"], nb["level"]) + 1, na["first"], nb["last"], text, children=[a, b]))
-                self.stats["merges"] += 1
-            if len(lines) < len(batch): return nodes
-        return nodes
+            for (pair, _), text in zip(batch, lines): out[pair] = text
+            if len(lines) < len(batch): return out
+        return out
 
     # -- view maintenance ------------------------------------------------------------
+    def fit_digest(self, budget):
+        """Byte guard: merge the oldest pairs of the coarsest levels until the digest fits in `budget` bytes. The pairs of
+        one pass are taken from the top level down, so the view stays ordered (levels non-increasing). Stops when the
+        digest fits, when no level holds two nodes, or when the compactor fails. Returns the number of view edits."""
+        st = self.store; items = st.view["items"]; edits = 0
+        while True:
+            size = len(render_digest(st).encode("utf-8"))
+            if size <= budget: return edits
+            by_level = {}
+            for k, it in enumerate(items):
+                if it["kind"] == "node": by_level.setdefault(st.nodes[it["id"]]["level"], []).append(k)
+            if not by_level: return edits
+            per_line = size / sum(len(v) for v in by_level.values())
+            want = max(1, math.ceil((size - budget) / per_line))     # one merge saves about one line
+            plan = []                                                # (level positions, number of pairs), top level first
+            for lv in sorted(by_level, reverse=True):
+                idx = by_level[lv]
+                if idx[-1] - idx[0] != len(idx) - 1: continue        # not contiguous: leave this level alone
+                n = min(len(idx) // 2, want - sum(p for _, p in plan))
+                if n > 0: plan.append((idx, n))
+                if sum(p for _, p in plan) >= want: break
+            if not plan: return edits
+            pairs = [(items[idx[2 * p]]["id"], items[idx[2 * p + 1]]["id"]) for idx, n in plan for p in range(n)]
+            new = self.merge_pairs(pairs)
+            if not new: return edits
+            done, spans = 0, []
+            for idx, n in plan:                                      # the successful prefix, level by level
+                take = min(n, len(new) - done)
+                if take <= 0: break
+                spans.append((idx[0], idx[2 * take - 1], new[done:done + take])); done += take
+            for a, b, nodes in reversed(spans):                      # back to front: earlier positions stay valid
+                items[a: b + 1] = [{"kind": "node", "id": nd["id"]} for nd in nodes]
+            self.stats["guard_merges"] += done
+            edits += 1; st.save_view()
+
     def _cut_point(self, raw_idx, n):
         """Largest k <= n such that keeping raw items from k on starts a valid chat suffix (a user turn,
         or failing that an assistant tool-call message)."""
@@ -441,7 +530,8 @@ class Compactor:
             items = st.view["items"]
             raw_idx = [k for k, it in enumerate(items) if it["kind"] == "raw"]
             raw_chars = sum(len(st.log[items[k]["i"]]["content"]) for k in raw_idx)
-            if force or len(raw_idx) > cfg["raw_max"] or raw_chars > cfg["raw_max_chars"]:
+            over = len(render_digest(st).encode("utf-8")) + raw_view_bytes(st, cfg) > cfg["view_max_bytes"]
+            if force or over or len(raw_idx) > cfg["raw_max"] or raw_chars > cfg["raw_max_chars"]:
                 n = self._cut_point(raw_idx, max(0, len(raw_idx) - cfg["raw_min"]))
                 if n > 0:
                     nodes = self.summarize_msgs([items[k]["i"] for k in raw_idx[:n]])
@@ -464,6 +554,9 @@ class Compactor:
                             items[idx[0]: idx[done - 1] + 1] = [{"kind": "node", "id": nd["id"]} for nd in new]
                             edits += 1; st.save_view()
                 level += 1
+            # byte guard: on a context overflow (force) the digest gets half its budget
+            budget = min(cfg["digest_max_bytes"] // (2 if force else 1), cfg["view_max_bytes"] - raw_view_bytes(st, cfg))
+            edits += self.fit_digest(max(cfg["digest_min_bytes"] // (2 if force else 1), budget))
         finally:
             self.stats["seconds"] += time.time() - t0
         return edits
@@ -507,7 +600,8 @@ class Agent:
         if self._bg: self._bg.join(); self._bg = None
 
     def _chat_call(self, msgs, tools=TOOLS):
-        """Chat call with one recovery: on a context overflow, compact synchronously and retry."""
+        """Chat call with one recovery: on a context overflow, compact synchronously (raw zone promoted, digest cut to
+        half its byte budget) and retry."""
         try:
             return self.llm.chat(msgs, slot=0, tools=tools, max_tokens=self.cfg["agent_max_tokens"], think=self.cfg["agent_think"])
         except LLMError as e:
