@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# LEGACY: kept to reproduce the measurements made on the PrismML fork. Current runtime: start_servers_upstream.sh.
 # Starts the llama.cpp server used by OptChat (PrismML fork, CUDA): Bonsai 2 27B, 2 slots
 # (slot 0 = chat, slot 1 = compactor), 12k tokens of context each. ~7.3 GB VRAM on the RTX 3060 (clean measurement).
 #   -> http://127.0.0.1:18435

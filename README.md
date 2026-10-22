@@ -8,6 +8,33 @@ An endless chat whose history is its memory: every message is kept on disk, and 
 
 **License.** MIT OR Apache-2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`). Model weights are not included and carry their own licences.
 
+## Run
+
+OptChat needs Python 3.12 with `httpx`, and a `llama-server` from upstream [llama.cpp](https://github.com/ggml-org/llama.cpp) (build b11700, no fork) serving Ternary Bonsai 2 27B in the Q2_0 packing. The file is `Ternary-Bonsai-2-27B-Q2_0-prism-fork-required.gguf`: despite its name, upstream llama.cpp has read it since b11555.
+
+```bash
+pip install httpx
+bash start_servers_upstream.sh   # llama-server on http://127.0.0.1:18435, 2 slots of 12k tokens (wait ~15 s)
+curl http://127.0.0.1:18435/health
+python optchat.py chat           # interactive chat, memory in data/
+```
+
+The two paths at the top of `start_servers_upstream.sh` (`LLAMA`, `M27`) point to the author's machine: edit them first. Other commands: `say "message"` (one turn), `view` (digest and raw messages of the view), `stats`, `reset` (erases `data/`, refuses while a chat is running). Environment: `OPTCHAT_URL`, `OPTCHAT_DATA`, `OPTCHAT_COMPACT_URL` (a second server for compaction). On Windows, stop the server with `Stop-Process -Name llama-server -Force` in PowerShell (`taskkill /IM` does nothing under Git Bash).
+
+`start_servers.sh` starts the earlier PrismML fork of llama.cpp with the `PTQ1_0` file. It is kept only to reproduce the measurements made on the fork (benches v1 to v4 below, and the fork runs of the Apothicaire benchmark); do not use it for new work.
+
+Recall benchmark (plants 8 facts, 32 turns of filler, 8 questions; uses `data_bench/`, never `data/`):
+
+```bash
+python bench.py 2 16
+```
+
+Tests need no model server (a fake model stands in for `llama-server`) and run in CI on every pull request:
+
+```bash
+python -m unittest discover -s tests
+```
+
 ---
 
 ## Prototype et résultats (notes de travail, 7–8 octobre 2026)
@@ -19,21 +46,6 @@ Prototype de l'idée d'OptChat (gist de VictorTaelin : un chat infini dont l'his
 - **GPU** : RTX 3060 12 Go. Serveur à 2 slots de 12k tokens, cache KV q8 : 7,3 Go de VRAM (mesuré sur serveur seul).
 
 Tout le travail a été fait le 7 octobre 2026 au soir. Notes détaillées dans `notes/` (Pi Durable, dsh, spikes) et résultats des bancs dans `bench_results_v*.md`.
-
-## Lancer
-
-```bash
-bash start_servers.sh          # démarre llama-server sur http://127.0.0.1:18435 (attendre ~15 s)
-python optchat.py chat         # chat interactif, mémoire dans data/
-```
-
-Autres commandes : `say "message"` (un tour), `view` (digest + messages bruts de la vue), `stats`, `reset` (efface `data/`, refuse si un chat tourne). Variables : `OPTCHAT_URL`, `OPTCHAT_DATA`, `OPTCHAT_COMPACT_URL` (second serveur pour la compaction).
-
-Banc d'essai de rappel (plante 8 faits, 32 tours de remplissage, 8 questions ; utilise `data_bench/`, jamais `data/`) :
-
-```bash
-python bench.py 2 16
-```
 
 ## Fonctionnement
 
