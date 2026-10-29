@@ -4,7 +4,7 @@ An endless chat whose history is its memory: every message is kept on disk, and 
 
 **Attribution.** The design follows the OptChat idea published by Victor Taelin as a gist (an infinite chat compressed into a binary tree of summary lines with zoom). The code here is a new implementation, adapted to `llama.cpp` (KV-cache-aware lazy compaction, a second server slot for the compactor, grammar-constrained summaries); it shares no code with the gist.
 
-**Status.** A prototype with measurements: recall benchmark 8/8 planted facts after 32 turns of filler on Ternary Bonsai 2 27B (`bench.py`, results in `bench_results*.md`), a failed attempt with an 8B compactor (2/8), and notes on hosting the memory in two agent harnesses (`notes/`, `rapport.html`). One file, `optchat.py`, plus `httpx`. The working notes below are in French.
+**Status.** A prototype with measurements: recall benchmark (8 planted facts, 32 turns of filler, 8 questions) on Ternary Bonsai 2 27B Q2_0 on upstream llama.cpp b11700: 8/8, 7/8, 8/8 over three runs (bench v7), 7/8, 8/8, 8/8 over three runs with the memory fixes of 2026-10-20 (bench v9) (`bench.py`, results in `bench_results*.md`), a failed attempt with an 8B compactor (2/8), and notes on hosting the memory in two agent harnesses (`notes/`, `rapport.html`). One file, `optchat.py`, plus `httpx`. The working notes below are in French.
 
 **License.** MIT OR Apache-2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`). Model weights are not included and carry their own licences.
 
@@ -78,6 +78,8 @@ Tout le travail a été fait le 7 octobre 2026 au soir. Notes détaillées dans 
 | v3 | Bonsai 8B (2e serveur) | **2/8** | ~1 s | — | fusions qui perdent des faits, boucles d'outils |
 | v4 | 27B slot 1 + verbatim + corrections | 8/8 | ~1,5 s* | ~8 s* | 88/90 lignes L0 gratuites ; *GPU partagé avec le spike Pi Durable pendant le banc |
 
+Un seul run par banc (v1 à v4).
+
 Vue à ~80 messages : 4 à 10 messages bruts + ~28 lignes de résumé ≈ 5,5 Ko ≈ 1,5k tokens ; prompt total ≈ 2,9k tokens.
 
 ## Intégration dans un harness
@@ -86,7 +88,7 @@ Voir `notes/pi-durable.md` et `notes/pi-durable-spike.md` (Pi Durable, Earendil)
 
 ## Banc v5 : Underdog-Saluki-27B (8 octobre 2026)
 
-Même base Qwen3.8-27B que Bonsai 2, compression IQ2-mix de 7,9 Go lisible par le llama.cpp standard. Résultat (`bench_results_v5_saluki.md`) : rappel 8/8, 48 tours en 3,9 min, tour en cache ~1,2 s, tour avec promotion ~5 s, génération ~21 tok/s (Bonsai : ~24), 10,0 Go de VRAM occupés (Bonsai : 7,3). Verdict : remplacement valable, surtout si l'on veut se passer du fork PrismML ; Bonsai reste le défaut pour la marge de VRAM. Fichier : `models/Underdog-Saluki-27B-1.0-IQ2-mix.gguf`.
+Même base Qwen3.8-27B que Bonsai 2, compression IQ2-mix de 7,9 Go lisible par le llama.cpp standard. Résultat (`bench_results_v5_saluki.md`) : rappel 8/8 (un run), 48 tours en 3,9 min, tour en cache ~1,2 s, tour avec promotion ~5 s, génération ~21 tok/s (Bonsai : ~24), 10,0 Go de VRAM occupés (Bonsai : 7,3). Verdict : remplacement valable, surtout si l'on veut se passer du fork PrismML ; Bonsai reste le défaut pour la marge de VRAM. Fichier : `models/Underdog-Saluki-27B-1.0-IQ2-mix.gguf`.
 
 ## Banc v6 : Bonsai 2 9B et 4B (Q2_0) sur llama.cpp upstream b11700 (17 octobre 2026)
 
@@ -107,8 +109,19 @@ Même banc, même serveur upstream que v6, fichier `Ternary-Bonsai-2-27B-Q2_0-pr
 |---|---|---|---|---|
 | 27B Q2_0, upstream | ≈ 8,4 Go | ≈ 31 tok/s | 8/8, 7/8, 8/8 | 8/8, ≈ 24 tok/s, 7,3 Go |
 
-Le 7/8 du run 2 est une boucle d'appels d'outils sur une question, pas une perte à la compaction. Conclusion : le fork PrismML n'est plus nécessaire pour le 27B ; il reste le choix par défaut pour l'instant (1 Go de VRAM de moins), décision après le banc complet d'Apothicaire.
+Le 7/8 du run 2 est une boucle d'appels d'outils sur une question, pas une perte à la compaction. Conclusion : le fork PrismML n'est plus nécessaire pour le 27B ; il garde 1 Go de VRAM d'avance (7,3 contre ≈ 8,4 Go), mais le choix est fait au banc v8 ci-dessous : llama.cpp standard.
 
 ## Banc v8 : 27B Q2_0 upstream, banc complet d'Apothicaire (17 octobre 2026)
 
-Le banc de 25 exercices d'Apothicaire (porte v1) sur le serveur upstream b11700 : 193/200 tours corrects, 0/897 nombres non vérifiés, 141/141 appels d'outils valides, 8,0 s par tour (fork PTQ1_0 : 195/200, 0/926, 10,4 s). Décision : la démo du 17 novembre tourne sur llama.cpp standard, script `start_servers_upstream.sh` ; le fork reste la référence des mesures de porte jusqu'au jeu gelé.
+Le banc de 25 exercices d'Apothicaire (porte v1 ; 25 exercices × 8 tours = 200 tours) sur le serveur upstream b11700 : 193/200 tours corrects, 0/897 nombres non retrouvés dans un résultat d'outil ou un message de l'utilisateur (nombres vérifiés par la porte, brouillons comme réponses montrées), 141/141 appels d'outils valides, 8,0 s par tour en moyenne (fork PTQ1_0, run du 2026-10-09b : 195/200, 0/926, 160/160, 10,4 s). Un run chacun, un échantillonnage ; chiffres de développement, in-sample (exercices, formulations et règles de score écrits en même temps que la porte qu'ils mesurent) : des comptes, pas des taux avec intervalle. Décision : la démo du 17 novembre tourne sur llama.cpp standard (upstream b11700, Q2_0), script `start_servers_upstream.sh` ; le jeu gelé d'Apothicaire est prévu sur ce même serveur (`bench/FROZEN_SET.md` du dépôt Apothicaire). Le fork (`start_servers.sh`, fichier `PTQ1_0`) ne sert plus qu'à reproduire les anciennes mesures (bancs v1 à v4 et runs d'Apothicaire sur le fork, du 8 au 18 octobre).
+
+## Banc v9 : 27B Q2_0 upstream, garde en octets, jointures sans modèle, coupes propres (21 octobre 2026)
+
+Les trois correctifs de mémoire du 20 octobre (cartes T-094 à T-096, PR #1 fusionnée le 21 octobre) : garde en octets sur le digest et la zone brute avec fusions de niveaux forcées (`view_max_bytes` 18 000, `digest_max_bytes` 12 000) ; fusion sans modèle de deux lignes courtes, messages gardés verbatim jusqu'à 512 octets (au lieu de 160 caractères) ; coupe des lignes de résumé à une limite de mot, jamais dans un caractère UTF-8, et tête + queue des longs messages pour le compacteur. Même banc de rappel, même serveur upstream b11700 et même fichier Q2_0 que v7, trois exécutions (`bench_results_v9_27b_fixes_run1..3.md`, commit `6776a61`).
+
+| | rappel (3 runs) | durée d'un run | appels au compacteur | jointures sans modèle | fusions forcées par la garde |
+|---|---|---|---|---|---|
+| v9, avec les correctifs | 7/8, 8/8, 8/8 | 1,9 / 1,4 / 2,4 min | 5 / 3 / 9 | 56 / 54 / 72 | 0 / 0 / 0 |
+| v7, avant | 8/8, 7/8, 8/8 | 5,3 / 4,5 / 2,9 min | 30 / 27 / 17 | | |
+
+Le 7/8 du run 1 est une perte : à la question du port SSH, après un zoom, le modèle répond ne pas avoir l'information (le 7/8 de v7 est une boucle d'appels d'outils). 23 réponses justes sur 24 des deux côtés (trois runs de 8 questions, un seul jeu de runs de chaque version) : pas de régression mesurée, pas d'amélioration du rappel ; le coût de la compaction (appels au compacteur, durée du run) baisse. La garde en octets ne s'est pas déclenchée dans ces runs de 48 tours (0 fusion forcée) : elle est testée sans modèle (`tests/test_memory.py`), pas par ce banc.
