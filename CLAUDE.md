@@ -12,3 +12,5 @@ benchmark `bench.py`, results in `bench_results*.md`.
   measurements. `bench.py` needs the server, so it runs on the PC only.
 - `bench_results*.md` are measurements: never edit them by hand. `data/`, `data_bench/`, `run/` and
   model weights are git-ignored and stay local.
+- **README.** It states no figure that a run can change (no count, ratio or percentage): the figures live
+  in `BENCH.md` and `bench_results*.md`, and the README links to them (caladrius T-124).
