@@ -45,7 +45,7 @@ python -m unittest discover -s tests
 
 ## Apothicaire
 
-Apothicaire imports `optchat.py` unchanged (`Agent`, `LLM`, `LLMError`, `CFG`, `SYSTEM_PROMPT`, `TOOLS`) as the conversation memory of its assistant. A change to these names breaks the Apothicaire repository, so run its tests too (see `CLAUDE.md`).
+Apothicaire imports `optchat.py` unchanged (the names listed in `CLAUDE.md`) as the conversation memory of its assistant. A change to these names breaks the Apothicaire repository, so run its tests too (see `CLAUDE.md`).
 
 ## Read more
 
